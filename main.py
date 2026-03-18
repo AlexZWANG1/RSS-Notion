@@ -54,6 +54,79 @@ SOURCE_CLASSES = {
 }
 
 
+def _build_run_summary(all_items, selected, scored, source_results, summary, threshold):
+    """Build a rich run summary for Notion."""
+    source_stats = "\n".join(
+        f"  - {sr.source_name}: {len(sr.items)}条" + (f" (错误: {sr.error})" if sr.error else "")
+        for sr in source_results
+    )
+    selected_list = "\n".join(
+        f"  {i+1}. [{s.importance}] {s.original.title} — {s.one_line_summary}"
+        for i, s in enumerate(selected)
+    )
+    topic_counts: dict[str, int] = {}
+    for s in selected:
+        topic_counts[s.topic] = topic_counts.get(s.topic, 0) + 1
+    topic_dist = ", ".join(f"{t}({c})" for t, c in sorted(topic_counts.items(), key=lambda x: -x[1]))
+
+    return (
+        f"📊 处理统计\n"
+        f"抓取 {len(all_items)} 条 → AI编辑筛选 → 入选 {len(selected)} 条\n\n"
+        f"📡 数据源\n{source_stats}\n\n"
+        f"🏷️ 话题分布: {topic_dist}\n\n"
+        f"📋 入选内容\n{selected_list}\n\n"
+        f"💡 核心发现\n{summary}"
+    )
+
+
+def _build_email_body(all_items, selected, scored, source_results, summary, today):
+    """Build the email body: digest overview + recommended reading + trends."""
+    source_line = ", ".join(
+        f"{sr.source_name}({len(sr.items)})" for sr in source_results if sr.items
+    )
+
+    # Group selected by importance
+    high = [s for s in selected if s.importance == "高"]
+    medium = [s for s in selected if s.importance != "高"]
+
+    lines = [
+        f"AI 认知日报 — {today}",
+        f"{'='*40}",
+        f"",
+        f"今日 AI 扫描了 {len(all_items)} 条内容（来源: {source_line}），",
+        f"经过 LLM 编辑筛选，推荐 {len(selected)} 条值得关注。",
+        f"",
+    ]
+
+    if high:
+        lines.append("⭐ 重点阅读（高重要性）")
+        lines.append("-" * 30)
+        for s in high:
+            lines.append(f"  [{s.topic}] {s.original.title}")
+            lines.append(f"  → {s.one_line_summary}")
+            if s.key_insight:
+                lines.append(f"  💡 {s.key_insight}")
+            lines.append(f"  🔗 {s.original.url}")
+            lines.append("")
+
+    if medium:
+        lines.append("📌 值得一看")
+        lines.append("-" * 30)
+        for s in medium:
+            lines.append(f"  [{s.topic}] {s.original.title}")
+            lines.append(f"  → {s.one_line_summary}")
+            lines.append(f"  🔗 {s.original.url}")
+            lines.append("")
+
+    lines.append("📈 核心趋势与发现")
+    lines.append("=" * 40)
+    lines.append(summary)
+    lines.append("")
+    lines.append("—— AI Daily Digest Pipeline 自动生成")
+
+    return "\n".join(lines)
+
+
 async def run_pipeline(
     config: dict,
     skip_email: bool = False,
@@ -138,9 +211,10 @@ async def run_pipeline(
     scored = await score_items(all_items, interests, model=model)
     logger.info(f"  Scored {len(scored)} items")
 
-    # Filter to high-relevance items
+    # Filter: LLM editorial decision (include=True), with score threshold as fallback
     selected = filter_items(scored, threshold=threshold, max_items=max_selected)
-    logger.info(f"  Selected {len(selected)} items (score >= {threshold})")
+    included_count = sum(1 for s in scored if s.include)
+    logger.info(f"  LLM included {included_count} items, final selected {len(selected)}")
 
     # Also do the old-style processing for PDF compatibility
     processed = await process_items_batch(all_items, model=model)
@@ -159,12 +233,9 @@ async def run_pipeline(
         written = await write_scored_items_to_notion(selected, today)
         logger.info(f"  Wrote {written} items to Notion inbox")
 
-        # Write run report
-        run_summary = (
-            f"抓取 {len(all_items)} 条 → 评分筛选 → "
-            f"入选 {len(selected)} 条 (阈值 {threshold})\n"
-            f"来源: {', '.join(sr.source_name for sr in source_results)}\n"
-            f"Executive Summary:\n{summary}"
+        # Write run report (enriched with editorial details)
+        run_summary = _build_run_summary(
+            all_items, selected, scored, source_results, summary, threshold
         )
         await write_run_report_to_notion(run_summary, today)
     else:
@@ -221,17 +292,22 @@ async def run_pipeline(
     data_path.write_text(json.dumps(data_json, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info(f"Saved data.json: {data_path}")
 
-    # --- Phase 6: Email ---
+    # --- Phase 6: Email (send PNG image + rich digest body) ---
     if not skip_email:
         logger.info("Phase 6: Sending email...")
-        result.email_sent = send_report_email(pdf_path, summary, today)
+        image_path = str(Path(output_dir) / today / "report.png")
+        attachment = image_path if Path(image_path).exists() else pdf_path
+        email_body = _build_email_body(
+            all_items, selected, scored, source_results, summary, today
+        )
+        result.email_sent = send_report_email(attachment, email_body, today)
     else:
         logger.info("Phase 6: Email skipped (--skip-email)")
 
     # --- Done ---
     logger.info("=" * 50)
     logger.info(f"Pipeline complete! PDF: {pdf_path}")
-    logger.info(f"  Items: {len(all_items)} fetched → {len(selected)} selected (score >= {threshold})")
+    logger.info(f"  Items: {len(all_items)} fetched → {len(selected)} selected")
     if not skip_notion:
         logger.info(f"  Notion: {len(selected)} items written to inbox")
     if result.errors:

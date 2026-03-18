@@ -38,14 +38,16 @@ def _normalize_source(name: str) -> str:
     return name
 
 
-def _render_pdf_playwright(html_content: str, pdf_path: str) -> None:
-    """Render PDF using Playwright Chromium — full CSS3 support."""
+def _render_with_playwright(html_content: str, pdf_path: str, image_path: str) -> None:
+    """Render both PDF and full-page PNG using Playwright Chromium."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page()
+        page = browser.new_page(viewport={"width": 800, "height": 600})
         page.set_content(html_content, wait_until="networkidle")
+
+        # PDF
         page.pdf(
             path=pdf_path,
             format="A4",
@@ -57,6 +59,10 @@ def _render_pdf_playwright(html_content: str, pdf_path: str) -> None:
                 "right": "14mm",
             },
         )
+
+        # Full-page screenshot as PNG (for email attachment)
+        page.screenshot(path=image_path, full_page=True)
+
         browser.close()
 
 
@@ -187,14 +193,15 @@ def build_pdf(
         active_sources=active_sources,
     )
 
-    # ── Generate PDF ──
+    # ── Generate outputs ──
     out_path = Path(output_dir) / report_date
     out_path.mkdir(parents=True, exist_ok=True)
     pdf_path = str(out_path / "report.pdf")
+    image_path = str(out_path / "report.png")
 
-    # Try Playwright first, fall back to xhtml2pdf
+    # Try Playwright first (generates both PDF and PNG), fall back to xhtml2pdf
     try:
-        _render_pdf_playwright(html_content, pdf_path)
+        _render_with_playwright(html_content, pdf_path, image_path)
     except Exception:
         _render_pdf_xhtml2pdf(html_content, templates_dir, pdf_path)
 

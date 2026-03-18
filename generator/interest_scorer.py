@@ -1,4 +1,9 @@
-"""Score source items against user interests loaded from Notion config page."""
+"""Score and curate source items against user interests loaded from Notion config page.
+
+The LLM acts as an editorial curator — it decides what to include, how to
+classify, and how important each item is.  No hardcoded topic lists, content
+types, or numeric thresholds.
+"""
 
 import asyncio
 import json
@@ -17,20 +22,6 @@ BATCH_SIZE = 15
 
 CONFIG_PAGE_ID = "32516831-83e6-8100-b28f-f60937b0d472"
 RESEARCH_DB_ID = "2fe16831-83e6-805c-a095-000bab8d1eca"
-
-VALID_TOPICS = [
-    "Agent Infra",
-    "AI应用层",
-    "MCP",
-    "Tool Use",
-    "大模型推理",
-    "Agent应用",
-    "Agent安全",
-    "云原生",
-    "产品战略",
-    "投资",
-    "商业模式",
-]
 
 DEFAULT_KEYWORDS = [
     "AI", "LLM", "GPT", "agent", "RAG", "transformer", "diffusion",
@@ -59,17 +50,15 @@ class UserInterests:
     research_titles: list[str] = field(default_factory=list)
 
 
-VALID_CONTENT_TYPES = ["新闻", "深度分析", "技术报告", "博客/视频", "开源项目"]
-
-
 @dataclass
 class ScoredItem:
-    """A source item with interest-relevance scoring."""
+    """A source item with LLM-driven editorial curation."""
     original: SourceItem
     score: int = 5
-    topic: str = ""
-    content_type: str = "新闻"  # 新闻/深度分析/技术报告/博客视频/开源项目
-    importance: str = "中"
+    include: bool = False          # LLM decides: should this be in today's digest?
+    topic: str = ""                # Free-form, LLM assigns
+    content_type: str = ""         # Free-form, LLM assigns
+    importance: str = "中"         # LLM directly assigns 高/中/低
     one_line_summary: str = ""
     key_insight: str = ""
     tags: list[str] = field(default_factory=list)
@@ -154,16 +143,7 @@ def _extract_rich_text(block_or_prop) -> str:
 
 
 def _parse_config_blocks(blocks: list[dict]) -> dict[str, str]:
-    """Walk page blocks and map section headings to their body text.
-
-    Expects a layout like:
-        ## 筛选视角
-        产品人、投资人、创业者
-        ## 长期关注课题
-        - topic A
-        - topic B
-        ...
-    """
+    """Walk page blocks and map section headings to their body text."""
     sections: dict[str, str] = {}
     current_heading: Optional[str] = None
     current_lines: list[str] = []
@@ -171,9 +151,7 @@ def _parse_config_blocks(blocks: list[dict]) -> dict[str, str]:
     for block in blocks:
         btype = block.get("type", "")
 
-        # Heading blocks
         if btype in ("heading_1", "heading_2", "heading_3"):
-            # Save previous section
             if current_heading is not None:
                 sections[current_heading] = "\n".join(current_lines).strip()
             heading_data = block.get(btype, {})
@@ -181,7 +159,6 @@ def _parse_config_blocks(blocks: list[dict]) -> dict[str, str]:
             current_lines = []
             continue
 
-        # Content blocks (paragraph, bulleted list, numbered list, etc.)
         text = ""
         if btype == "paragraph":
             text = _extract_rich_text(block.get("paragraph", {}).get("rich_text", []))
@@ -197,7 +174,6 @@ def _parse_config_blocks(blocks: list[dict]) -> dict[str, str]:
         if text and current_heading is not None:
             current_lines.append(text)
 
-    # Flush last section
     if current_heading is not None:
         sections[current_heading] = "\n".join(current_lines).strip()
 
@@ -236,7 +212,6 @@ def _fetch_research_titles(notion, database_id: str) -> list[str]:
             resp = notion.databases.query(**kwargs)
             for page in resp.get("results", []):
                 props = page.get("properties", {})
-                # Try common title property names
                 for key in ("Name", "名称", "title", "Title"):
                     title_prop = props.get(key)
                     if title_prop and title_prop.get("type") == "title":
@@ -260,19 +235,14 @@ def _fetch_research_titles(notion, database_id: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 async def load_user_interests(config: dict | None = None) -> UserInterests:
-    """Load user interest configuration from Notion config page.
-
-    Falls back to default AI/tech keywords if NOTION_TOKEN is not set.
-    """
+    """Load user interest configuration from Notion config page."""
     if not os.environ.get("NOTION_TOKEN"):
         logger.info("NOTION_TOKEN not set — using default interests")
         return UserInterests()
 
-    # Allow overriding IDs from config.json
     notion_cfg = (config or {}).get("notion", {})
     page_id = notion_cfg.get("config_page_id", CONFIG_PAGE_ID)
     research_db = notion_cfg.get("research_database_data_source", "")
-    # Strip "collection://" prefix if present
     research_id = research_db.replace("collection://", "") if research_db else RESEARCH_DB_ID
 
     loop = asyncio.get_running_loop()
@@ -280,7 +250,6 @@ async def load_user_interests(config: dict | None = None) -> UserInterests:
     try:
         notion = _get_notion_client()
 
-        # Fetch config page blocks and research titles in parallel via executor
         sections_future = loop.run_in_executor(
             None, _fetch_config_page, notion, page_id
         )
@@ -292,7 +261,6 @@ async def load_user_interests(config: dict | None = None) -> UserInterests:
             sections_future, titles_future
         )
 
-        # Parse sections
         perspective = sections.get("筛选视角", "产品人").strip()
 
         topics_raw = sections.get("长期关注课题", "")
@@ -328,7 +296,7 @@ async def load_user_interests(config: dict | None = None) -> UserInterests:
 def _build_scoring_prompt(
     items: list[SourceItem], interests: UserInterests
 ) -> str:
-    """Build the LLM scoring prompt for a batch of items."""
+    """Build the LLM editorial curation prompt for a batch of items."""
     entries = []
     for i, item in enumerate(items):
         entries.append(
@@ -340,59 +308,58 @@ def _build_scoring_prompt(
     items_text = "\n\n".join(entries)
 
     topics_text = ", ".join(interests.topics)
-    keywords_text = ", ".join(interests.keywords[:50])  # cap to avoid prompt bloat
+    keywords_text = ", ".join(interests.keywords[:50])
     research_text = ", ".join(interests.research_titles[:30])
-
-    valid_topics_text = " / ".join(VALID_TOPICS)
-    valid_types_text = " / ".join(VALID_CONTENT_TYPES)
 
     designated_section = ""
     if interests.designated_topic:
         designated_section = (
             f"\n**今日指定课题**: {interests.designated_topic}\n"
-            "Items directly related to the designated topic should receive a score boost (+2, capped at 10).\n"
+            "Items directly related to the designated topic should be strongly favored for inclusion.\n"
         )
 
     return (
-        "You are an AI content scoring assistant. Score each item's relevance to the "
-        "user's interests.\n\n"
-        f"**User perspective**: {interests.perspective}\n"
-        f"**Long-term topics**: {topics_text}\n"
-        f"**Keywords**: {keywords_text}\n"
+        "You are an editorial curator for a personalized AI daily digest. "
+        "Your job is to decide which items are worth the reader's time today.\n\n"
+
+        "## Reader Profile\n"
+        f"**Perspective**: {interests.perspective}\n"
+        f"**Long-term interests**: {topics_text}\n"
+        f"**Keywords they track**: {keywords_text}\n"
         f"**Existing research topics**: {research_text}\n"
         f"{designated_section}\n"
-        "## Scoring rubric\n"
-        "- 10 = directly hits a core topic or designated topic\n"
-        "- 7-9 = highly relevant to user's interests\n"
-        "- 4-6 = somewhat relevant, tangentially related\n"
-        "- 1-3 = not relevant to user's interests\n\n"
+
+        "## Your editorial criteria\n"
+        "Think like a thoughtful human editor, not a keyword matcher:\n"
+        "- **Include** items that would make the reader stop scrolling — genuinely valuable, "
+        "surprising, or actionable for someone with these interests\n"
+        "- **Exclude** routine announcements, tangential topics, papers with no practical relevance, "
+        "and anything the reader would skip past\n"
+        "- Prefer quality over quantity — it's OK to include only 2-3 items from a batch of 15\n"
+        "- Consider: Would a smart colleague forward this to the reader? If not, exclude it.\n\n"
+
         "## Output format\n"
         "Return a JSON object with a single key \"items\" whose value is an array. "
         "Each element must have:\n"
         "- index: int (the [i] index from input)\n"
-        "- score: int (1-10)\n"
-        f"- topic: string (map to ONE of: {valid_topics_text})\n"
-        f"- content_type: string (map to ONE of: {valid_types_text})\n"
-        "- one_line_summary: string (Chinese, 20-40 characters)\n"
+        "- include: boolean (your editorial decision — should this be in today's digest?)\n"
+        "- score: int (1-10, your confidence in the recommendation)\n"
+        "- topic: string (assign a concise topic label that fits the content — "
+        "use the reader's interest topics when appropriate, or create a fitting label)\n"
+        "- content_type: string (classify freely, e.g. 新闻/深度分析/技术报告/博客/开源项目/论文/产品发布/行业动态/观点 — whatever fits best)\n"
+        "- importance: string (高/中/低 — your editorial judgment of how important this is to the reader)\n"
+        "- one_line_summary: string (Chinese, 20-40 characters, crisp and informative)\n"
         "- key_insight: string (one English sentence, the most important takeaway)\n"
         "- tags: array of 2-4 short tags\n"
-        "- score_reason: string (brief explanation of the score, 1-2 sentences)\n\n"
+        "- score_reason: string (1-2 sentences explaining your editorial decision)\n\n"
+
         f"Items:\n\n{items_text}"
     )
 
 
-def _importance_from_score(score: int) -> str:
-    """Map numeric score to importance label."""
-    if score >= 9:
-        return "高"
-    elif score >= 7:
-        return "中"
-    return "低"
-
-
 def _fallback_scored_item(item: SourceItem) -> ScoredItem:
     """Create a minimal ScoredItem when LLM scoring fails."""
-    return ScoredItem(original=item, score=5, topic="AI应用层", importance="低")
+    return ScoredItem(original=item, score=3, include=False, topic="未分类", importance="低")
 
 
 async def score_items(
@@ -401,10 +368,10 @@ async def score_items(
     model: str = "gpt-5.2",
     max_retries: int = 2,
 ) -> list[ScoredItem]:
-    """Score source items against user interests via LLM.
+    """Curate source items against user interests via LLM.
 
-    Items are sent in batches of 15. Returns a list of ScoredItem with
-    relevance scores, topic mapping, summaries, and insights.
+    The LLM acts as an editorial curator — it decides include/exclude,
+    assigns topics and content types freely, and judges importance directly.
     """
     if not items:
         return []
@@ -440,20 +407,19 @@ async def score_items(
                     entry = llm_map.get(i)
                     if entry:
                         raw_score = max(1, min(10, int(entry.get("score", 5))))
-                        topic = entry.get("topic", "AI应用层")
-                        if topic not in VALID_TOPICS:
-                            topic = "AI应用层"
-                        ctype = entry.get("content_type", "新闻")
-                        if ctype not in VALID_CONTENT_TYPES:
-                            ctype = "新闻"
+                        # LLM assigns all fields freely — no validation against hardcoded lists
+                        importance = entry.get("importance", "中")
+                        if importance not in ("高", "中", "低"):
+                            importance = "中"
 
                         results.append(
                             ScoredItem(
                                 original=source_item,
                                 score=raw_score,
-                                topic=topic,
-                                content_type=ctype,
-                                importance=_importance_from_score(raw_score),
+                                include=bool(entry.get("include", False)),
+                                topic=entry.get("topic", ""),
+                                content_type=entry.get("content_type", ""),
+                                importance=importance,
                                 one_line_summary=entry.get("one_line_summary", ""),
                                 key_insight=entry.get("key_insight", ""),
                                 tags=entry.get("tags", []),
@@ -475,12 +441,23 @@ async def score_items(
 def filter_items(
     scored: list[ScoredItem],
     threshold: int = 7,
-    max_items: int = 15,
+    max_items: int = 20,
 ) -> list[ScoredItem]:
-    """Filter scored items by threshold and cap at max_items.
+    """Filter items based on LLM's editorial decision.
 
-    Returns items sorted by score descending.
+    Primary filter: LLM's include=True decision.
+    Fallback: if LLM includes too few (<3), also add items with score >= threshold.
+    Safety cap: max_items prevents runaway output.
     """
-    above = [s for s in scored if s.score >= threshold]
-    above.sort(key=lambda s: s.score, reverse=True)
-    return above[:max_items]
+    # Primary: LLM's editorial picks
+    included = [s for s in scored if s.include]
+
+    # Fallback: if LLM was too conservative, add high-scoring items
+    if len(included) < 3:
+        above_threshold = [s for s in scored if not s.include and s.score >= threshold]
+        above_threshold.sort(key=lambda s: s.score, reverse=True)
+        included.extend(above_threshold)
+
+    # Sort by score descending, cap at max
+    included.sort(key=lambda s: s.score, reverse=True)
+    return included[:max_items]

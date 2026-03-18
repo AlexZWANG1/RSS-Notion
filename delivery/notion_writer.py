@@ -117,17 +117,25 @@ async def _run_sync(func, *args, **kwargs):
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 
-def _is_duplicate(notion: Client, title: str) -> bool:
-    """Check whether a page with the exact same title already exists."""
+def _is_duplicate(notion: Client, title: str, url: str | None = None) -> bool:
+    """Check whether a page with the same title or URL already exists."""
     try:
+        # Check by title
         results = notion.search(query=title, filter={"property": "object", "value": "page"})
         for page in results.get("results", []):
             props = page.get("properties", {})
+            # Title match
             name_prop = props.get("名称", {})
             title_parts = name_prop.get("title", [])
             if title_parts:
                 existing = "".join(t.get("plain_text", "") for t in title_parts)
                 if existing == title:
+                    return True
+            # URL match — same article even if title differs
+            if url:
+                url_prop = props.get("原文链接", {})
+                existing_url = url_prop.get("url", "")
+                if existing_url and existing_url == url:
                     return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("Duplicate check failed: %s", exc)
@@ -157,8 +165,8 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
         try:
             title = f"[AI精选] {item.original.title}"
 
-            # Duplicate check
-            dup = await _run_sync(_is_duplicate, notion, title)
+            # Duplicate check (by title + URL)
+            dup = await _run_sync(_is_duplicate, notion, title, item.original.url)
             if dup:
                 logger.info("Skipping duplicate: %s", title)
                 continue
