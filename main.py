@@ -59,6 +59,7 @@ async def run_pipeline(
     skip_email: bool = False,
     skip_notion: bool = False,
     only_sources: list[str] | None = None,
+    interests_override: str | None = None,
 ) -> PipelineResult:
     """Run the full pipeline."""
     today = date.today().isoformat()
@@ -110,13 +111,24 @@ async def run_pipeline(
     threshold = schedule_cfg.get("relevance_threshold", 7)
     max_selected = schedule_cfg.get("max_selected", 15)
 
-    interests = await load_user_interests(config)
+    if interests_override:
+        # CLI --interests flag: quick personalization without Notion
+        from generator.interest_scorer import UserInterests
+        topics = [t.strip() for t in interests_override.split(",") if t.strip()]
+        interests = UserInterests(
+            perspective="AI/tech analyst",
+            topics=topics,
+            keywords=topics,  # use topics as keywords too
+        )
+        logger.info(f"  Using CLI interests: {topics}")
+    else:
+        interests = await load_user_interests(config)
     if interests.topics:
-        logger.info(f"  Interests loaded: {len(interests.topics)} topics, {len(interests.keywords)} keywords")
+        logger.info(f"  Interests: {len(interests.topics)} topics, {len(interests.keywords)} keywords")
         if interests.designated_topic:
             logger.info(f"  Designated topic: {interests.designated_topic}")
     else:
-        logger.info("  Using default interests (no Notion config)")
+        logger.info("  Using default interests")
 
     # --- Phase 3: Score items against user interests ---
     logger.info("Phase 3: Scoring items against user interests...")
@@ -229,10 +241,23 @@ async def run_pipeline(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AI Daily Digest Pipeline")
+    parser = argparse.ArgumentParser(
+        description="AI Daily Digest — personalized AI/tech news agent",
+        epilog="Examples:\n"
+               "  python main.py                              # full run\n"
+               "  python main.py --interests 'AI Agent, SaaS' # personalized\n"
+               "  python main.py --skip-email --sources hackernews,arxiv\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--skip-email", action="store_true", help="Skip email delivery")
-    parser.add_argument("--skip-notion", action="store_true", help="Skip Folo/Notion source")
+    parser.add_argument("--skip-notion", action="store_true", help="Skip Notion read/write")
     parser.add_argument("--sources", type=str, help="Comma-separated source names (e.g. hackernews,arxiv)")
+    parser.add_argument(
+        "--interests", type=str,
+        help="Comma-separated interest topics for personalized scoring "
+             "(e.g. 'AI Agent, LLM inference, SaaS'). "
+             "Overrides Notion config page.",
+    )
     args = parser.parse_args()
 
     only_sources = args.sources.split(",") if args.sources else None
@@ -242,6 +267,7 @@ def main():
         skip_email=args.skip_email,
         skip_notion=args.skip_notion,
         only_sources=only_sources,
+        interests_override=args.interests,
     ))
 
     # Exit 0 even with partial source errors (they're expected)
