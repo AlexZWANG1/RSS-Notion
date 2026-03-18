@@ -19,9 +19,15 @@ from sources.producthunt import ProductHuntSource
 from sources.github_trending import GitHubTrendingSource
 from sources.folo import FoloSource
 from sources.models import SourceResult, PipelineResult
+from generator.interest_scorer import load_user_interests, score_items, filter_items
 from generator.summarizer import process_items_batch, generate_executive_summary
 from generator.pdf_builder import build_pdf
 from delivery.emailer import send_report_email
+from delivery.notion_writer import (
+    write_scored_items_to_notion,
+    write_research_report_to_notion,
+    write_run_report_to_notion,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -98,33 +104,82 @@ async def run_pipeline(
     if not all_items:
         logger.warning("No items fetched, generating minimal report")
 
-    # --- Phase: LLM processing ---
-    logger.info("Phase 2: LLM processing...")
+    # --- Phase 2: Load user interests from Notion config ---
+    logger.info("Phase 2: Loading user interests from Notion...")
+    schedule_cfg = config.get("schedule", {})
+    threshold = schedule_cfg.get("relevance_threshold", 7)
+    max_selected = schedule_cfg.get("max_selected", 15)
+
+    interests = await load_user_interests(config)
+    if interests.topics:
+        logger.info(f"  Interests loaded: {len(interests.topics)} topics, {len(interests.keywords)} keywords")
+        if interests.designated_topic:
+            logger.info(f"  Designated topic: {interests.designated_topic}")
+    else:
+        logger.info("  Using default interests (no Notion config)")
+
+    # --- Phase 3: Score items against user interests ---
+    logger.info("Phase 3: Scoring items against user interests...")
     model = llm_cfg.get("processing_model", "gpt-5.2")
     summary_model = llm_cfg.get("summary_model", "gpt-5.2")
 
+    scored = await score_items(all_items, interests, model=model)
+    logger.info(f"  Scored {len(scored)} items")
+
+    # Filter to high-relevance items
+    selected = filter_items(scored, threshold=threshold, max_items=max_selected)
+    logger.info(f"  Selected {len(selected)} items (score >= {threshold})")
+
+    # Also do the old-style processing for PDF compatibility
     processed = await process_items_batch(all_items, model=model)
     result.processed_items = processed
-    logger.info(f"Processed {len(processed)} items")
 
-    # Executive summary
+    # Executive summary (use scored items for richer context)
     logger.info("Generating executive summary...")
     summary = await generate_executive_summary(processed, model=summary_model)
     result.executive_summary = summary
 
-    # --- Phase: PDF generation ---
-    logger.info("Phase 3: Generating PDF...")
+    # --- Phase 4: Write to Notion ---
+    if not skip_notion:
+        logger.info("Phase 4: Writing to Notion...")
+
+        # Write selected items to inbox
+        written = await write_scored_items_to_notion(selected, today)
+        logger.info(f"  Wrote {written} items to Notion inbox")
+
+        # Write run report
+        run_summary = (
+            f"抓取 {len(all_items)} 条 → 评分筛选 → "
+            f"入选 {len(selected)} 条 (阈值 {threshold})\n"
+            f"来源: {', '.join(sr.source_name for sr in source_results)}\n"
+            f"Executive Summary:\n{summary}"
+        )
+        await write_run_report_to_notion(run_summary, today)
+    else:
+        logger.info("Phase 4: Notion write-back skipped (--skip-notion)")
+
+    # --- Phase 5: PDF generation ---
+    logger.info("Phase 5: Generating PDF...")
     output_dir = pdf_cfg.get("output_dir", "output")
     pdf_path = build_pdf(source_results, processed, summary, output_dir, today)
     result.pdf_path = pdf_path
 
-    # Save data.json alongside PDF
+    # Save data.json alongside PDF (enriched with scores)
     data_dir = Path(output_dir) / today
     data_dir.mkdir(parents=True, exist_ok=True)
     data_path = data_dir / "data.json"
+
+    # Build scored lookup for enriching data.json
+    score_map = {s.original.url: s for s in scored}
+
     data_json = {
         "date": today,
         "executive_summary": summary,
+        "interests": {
+            "topics": interests.topics,
+            "keywords": interests.keywords[:20],
+            "designated_topic": interests.designated_topic,
+        },
         "sources": [
             {
                 "name": sr.source_name,
@@ -144,6 +199,8 @@ async def run_pipeline(
                 "relevance": pi.relevance,
                 "tags": pi.tags,
                 "score": pi.original.score,
+                "interest_score": score_map[pi.original.url].score if pi.original.url in score_map else None,
+                "topic": score_map[pi.original.url].topic if pi.original.url in score_map else None,
             }
             for pi in processed
         ],
@@ -151,16 +208,19 @@ async def run_pipeline(
     data_path.write_text(json.dumps(data_json, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info(f"Saved data.json: {data_path}")
 
-    # --- Phase: Email ---
+    # --- Phase 6: Email ---
     if not skip_email:
-        logger.info("Phase 4: Sending email...")
+        logger.info("Phase 6: Sending email...")
         result.email_sent = send_report_email(pdf_path, summary, today)
     else:
-        logger.info("Phase 4: Email skipped (--skip-email)")
+        logger.info("Phase 6: Email skipped (--skip-email)")
 
     # --- Done ---
     logger.info("=" * 50)
     logger.info(f"Pipeline complete! PDF: {pdf_path}")
+    logger.info(f"  Items: {len(all_items)} fetched → {len(selected)} selected (score >= {threshold})")
+    if not skip_notion:
+        logger.info(f"  Notion: {len(selected)} items written to inbox")
     if result.errors:
         logger.warning(f"Errors: {result.errors}")
     logger.info("=" * 50)
