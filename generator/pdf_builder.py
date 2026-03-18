@@ -35,18 +35,72 @@ def _render_pdf_weasyprint(html_content: str, templates_dir: str, pdf_path: str)
     HTML(string=html_content, base_url=templates_dir).write_pdf(pdf_path)
 
 
+def _find_chinese_font() -> str | None:
+    """Find a Chinese font file on the system."""
+    candidates = []
+    # Windows fonts — prefer .ttf over .ttc for better compatibility
+    win_fonts = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts")
+    if os.path.isdir(win_fonts):
+        for name in ("simhei.ttf", "NotoSansSC-VF.ttf", "msyh.ttc", "simsun.ttc"):
+            p = os.path.join(win_fonts, name)
+            if os.path.isfile(p):
+                candidates.append(p)
+    # Linux fonts
+    for d in ("/usr/share/fonts", "/usr/local/share/fonts"):
+        if os.path.isdir(d):
+            for root, _, files in os.walk(d):
+                for f in files:
+                    if "notosanssc" in f.lower() or "notosanscjk" in f.lower() or "wqy" in f.lower():
+                        candidates.append(os.path.join(root, f))
+    return candidates[0] if candidates else None
+
+
+def _register_chinese_font() -> str:
+    """Register a Chinese font with reportlab and return the font family name."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    font_path = _find_chinese_font()
+    if not font_path:
+        return "Helvetica"
+
+    font_name = "ChineseFont"
+    try:
+        if font_path.endswith(".ttc"):
+            # TTC (TrueType Collection) — use subfont index 0
+            pdfmetrics.registerFont(TTFont(font_name, font_path, subfontIndex=0))
+        else:
+            pdfmetrics.registerFont(TTFont(font_name, font_path))
+        return font_name
+    except Exception:
+        return "Helvetica"
+
+
 def _render_pdf_xhtml2pdf(html_content: str, templates_dir: str, pdf_path: str) -> None:
     """Render PDF using xhtml2pdf (pure-Python fallback)."""
     from xhtml2pdf import pisa
+    from xhtml2pdf.default import DEFAULT_FONT
+
+    # Register Chinese font with reportlab and patch xhtml2pdf's font map
+    font_name = _register_chinese_font()
+    if font_name != "Helvetica":
+        DEFAULT_FONT[font_name.lower()] = font_name
 
     # xhtml2pdf needs the CSS inlined; it cannot follow <link> tags reliably.
-    # Also strip features xhtml2pdf doesn't support: @import, :root, CSS vars.
     css_path = Path(templates_dir) / "styles.css"
     if css_path.exists():
         css_text = css_path.read_text(encoding="utf-8")
         # Remove @import and :root blocks (unsupported by xhtml2pdf)
         css_text = re.sub(r"@import\s+url\([^)]*\)\s*;", "", css_text)
         css_text = re.sub(r":root\s*\{[^}]*\}", "", css_text)
+
+        # Override body font to use registered Chinese font
+        if font_name != "Helvetica":
+            css_text = css_text.replace(
+                'font-family: "Noto Sans SC", "Microsoft YaHei", "SimHei", sans-serif;',
+                f'font-family: {font_name};',
+            )
+
         # Replace the <link> tag with inline <style>
         html_content = html_content.replace(
             '<link rel="stylesheet" href="styles.css">',
