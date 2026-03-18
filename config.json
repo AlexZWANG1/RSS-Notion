@@ -1,0 +1,20 @@
+{
+  "model": "claude-sonnet-4-6",
+  "notion": {
+    "inbox_database_id": "d1da0a02-bb0f-4dfd-a7d0-8cf918e6f23c",
+    "inbox_data_source": "collection://ea643ad3-5c45-435d-b914-e16b46af8ec1",
+    "archive_database_id": "fa9724b4-aa43-48ad-8f43-0f902abd760f",
+    "archive_data_source": "collection://296ab5f0-a9e7-431a-9097-ba07f24df0aa",
+    "config_page_id": "32516831-83e6-8100-b28f-f60937b0d472",
+    "research_database_data_source": "collection://2fe16831-83e6-805c-a095-000bab8d1eca"
+  },
+  "schedule": {
+    "times": ["08:00", "18:00"],
+    "max_rss_articles": 100,
+    "relevance_threshold": 7,
+    "max_selected": 15
+  },
+  "folo": {
+    "session_token_env": "FOLO_SESSION_TOKEN"
+  }
+}
