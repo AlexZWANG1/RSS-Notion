@@ -16,5 +16,23 @@
   },
   "folo": {
     "session_token_env": "FOLO_SESSION_TOKEN"
+  },
+  "pipeline": {
+    "sources": {
+      "folo": { "enabled": true },
+      "hackernews": { "enabled": true, "max_items": 10 },
+      "arxiv": { "enabled": true, "categories": ["cs.AI", "cs.CL", "cs.LG"], "max_items": 20 },
+      "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
+      "producthunt": { "enabled": true, "max_items": 10 },
+      "github_trending": { "enabled": true, "language": "python", "max_items": 10 }
+    },
+    "llm": {
+      "summary_model": "gpt-5.2",
+      "processing_model": "gpt-5.2"
+    },
+    "pdf": {
+      "template": "daily_report",
+      "output_dir": "output"
+    }
   }
 }

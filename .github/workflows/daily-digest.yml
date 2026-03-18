@@ -1,0 +1,54 @@
+name: AI Daily Digest
+
+on:
+  schedule:
+    # 08:00 UTC+8 = 00:00 UTC
+    - cron: '0 0 * * *'
+    # 18:00 UTC+8 = 10:00 UTC
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+
+jobs:
+  daily-digest:
+    runs-on: ubuntu-latest
+
+    env:
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install CJK fonts for PDF support
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run AI Daily Digest pipeline
+        run: python main.py --skip-notion
+
+      - name: Upload output artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-digest-output
+          path: output/
+          retention-days: 30

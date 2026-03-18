@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 认知日报 — {{ date }}</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <h1>AI 认知日报</h1>
+    <div class="date">{{ date }}</div>
+    <div class="stats">共收录 {{ total_items }} 条内容，来自 {{ active_sources }} 个数据源</div>
+</div>
+
+<!-- Executive Summary -->
+{% if executive_summary %}
+<div class="summary">
+    <div class="summary-title">今日概览</div>
+    {{ executive_summary }}
+</div>
+{% endif %}
+
+<!-- Source Sections -->
+{% for section in sections %}
+<div class="section">
+    <div class="section-header">
+        <span class="icon">{{ section.icon }}</span>
+        <span>{{ section.title }}</span>
+        <span class="count">{{ section.entries | length }} 条</span>
+    </div>
+
+    {% if section.error %}
+    <div class="source-unavailable">数据源暂不可用：{{ section.error }}</div>
+    {% elif section.entries | length == 0 %}
+    <div class="source-unavailable">今日暂无收录内容</div>
+    {% else %}
+    <table class="items-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>标题 / 来源</th>
+                <th>摘要</th>
+                <th>标签</th>
+                <th>热度</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in section.entries %}
+            <tr{% if loop.index is even %} class="even-row"{% endif %}>
+                <td>{{ loop.index }}</td>
+                <td>
+                    {% if item.url %}<a href="{{ item.url }}">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}
+                    <span class="item-source">{{ item.source_name }}</span>
+                </td>
+                <td>{{ item.one_line_summary }}</td>
+                <td>
+                    {% for tag in item.tags %}
+                    <span class="tag">{{ tag }}</span>
+                    {% endfor %}
+                </td>
+                <td class="score">{{ item.score if item.score is not none else "—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endfor %}
+
+<!-- Footer -->
+<div class="footer">
+    AI 认知日报 &middot; 自动生成于 {{ date }} &middot; Powered by AI Daily Digest Pipeline
+</div>
+
+</body>
+</html>

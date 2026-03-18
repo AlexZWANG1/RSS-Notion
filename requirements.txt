@@ -1,0 +1,10 @@
+aiohttp>=3.9
+arxiv>=2.1
+beautifulsoup4>=4.12
+jinja2>=3.1
+notion-client>=2.2
+openai>=1.30
+praw>=7.7
+python-dotenv>=1.0
+weasyprint>=62.0
+xhtml2pdf>=0.2.11
