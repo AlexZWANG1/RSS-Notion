@@ -2,7 +2,6 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 认知日报 — {{ date }}</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -10,69 +9,76 @@
 
 <!-- Header -->
 <div class="header">
-    <h1>AI 认知日报</h1>
-    <div class="date">{{ date }}</div>
-    <div class="stats">共收录 {{ total_items }} 条内容，来自 {{ active_sources }} 个数据源</div>
+    <div class="header-top">
+        <h1>AI 认知日报</h1>
+        <div class="header-meta">
+            <span class="date">{{ date }}</span>
+            <span class="stats">{{ total_items }} 条内容 · {{ active_sources }} 个数据源</span>
+        </div>
+    </div>
 </div>
 
 <!-- Executive Summary -->
 {% if executive_summary %}
-<div class="summary">
-    <div class="summary-title">今日概览</div>
-    {{ executive_summary }}
+<div class="summary-section">
+    <div class="summary-label">今日概览</div>
+    <div class="summary-body">{{ executive_summary }}</div>
 </div>
 {% endif %}
 
 <!-- Source Sections -->
 {% for section in sections %}
+{% if section.entries | length > 0 or section.error %}
 <div class="section">
     <div class="section-header">
-        <span class="icon">{{ section.icon }}</span>
-        <span>{{ section.title }}</span>
-        <span class="count">{{ section.entries | length }} 条</span>
+        <span class="section-icon">{{ section.icon }}</span>
+        <span class="section-title">{{ section.title }}</span>
+        <span class="section-count">{{ section.entries | length }} 条</span>
     </div>
 
     {% if section.error %}
-    <div class="source-unavailable">数据源暂不可用：{{ section.error }}</div>
+    <div class="empty-hint">数据源暂不可用：{{ section.error }}</div>
     {% elif section.entries | length == 0 %}
-    <div class="source-unavailable">今日暂无收录内容</div>
+    <div class="empty-hint">今日暂无收录内容</div>
     {% else %}
-    <table class="items-table">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>标题 / 来源</th>
-                <th>摘要</th>
-                <th>标签</th>
-                <th>热度</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for item in section.entries %}
-            <tr{% if loop.index is even %} class="even-row"{% endif %}>
-                <td>{{ loop.index }}</td>
-                <td>
-                    {% if item.url %}<a href="{{ item.url }}">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}
-                    <span class="item-source">{{ item.source_name }}</span>
-                </td>
-                <td>{{ item.one_line_summary }}</td>
-                <td>
-                    {% for tag in item.tags %}
-                    <span class="tag">{{ tag }}</span>
-                    {% endfor %}
-                </td>
-                <td class="score">{{ item.score if item.score is not none else "—" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="items-list">
+        {% for item in section.entries %}
+        <div class="item-card">
+            <div class="item-row">
+                {% if item.score is not none and item.score %}
+                <div class="item-score">{{ item.score }}</div>
+                {% else %}
+                <div class="item-score item-score-na">—</div>
+                {% endif %}
+                <div class="item-content">
+                    <div class="item-title-line">
+                        {% if item.url %}<a href="{{ item.url }}" class="item-title">{{ item.title }}</a>{% else %}<span class="item-title">{{ item.title }}</span>{% endif %}
+                        {% if item.content_type %}<span class="item-type item-type-{{ item.content_type_class }}">{{ item.content_type }}</span>{% endif %}
+                    </div>
+                    <div class="item-meta">{{ item.source_name }}</div>
+                    {% if item.one_line_summary %}
+                    <div class="item-summary">{{ item.one_line_summary }}</div>
+                    {% endif %}
+                    {% if item.tags %}
+                    <div class="item-tags">
+                        {% for tag in item.tags %}
+                        <span class="tag">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
     {% endif %}
 </div>
+{% endif %}
 {% endfor %}
 
 <!-- Footer -->
 <div class="footer">
-    AI 认知日报 &middot; 自动生成于 {{ date }} &middot; Powered by AI Daily Digest Pipeline
+    AI 认知日报 &middot; {{ date }} &middot; Powered by AI Daily Digest Pipeline
 </div>
 
 </body>

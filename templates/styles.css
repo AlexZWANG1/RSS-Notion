@@ -1,28 +1,9 @@
-/* ── AI Daily Digest — Report Stylesheet ──
- *
- * Theme colors:
- *   primary:    #1a1a2e
- *   accent:     #0f3460
- *   highlight:  #e94560
- *   bg-light:   #f8f9fa
- *   border:     #dee2e6
- *   text:       #212529
- *   text-muted: #6c757d
- *
- * Uses CSS variables for WeasyPrint; hardcoded fallbacks for xhtml2pdf.
- */
+/* ── AI Daily Digest — Notion-style Report ── */
 
-:root {
-    --primary: #1a1a2e;
-    --accent: #0f3460;
-    --highlight: #e94560;
-    --bg-light: #f8f9fa;
-    --border: #dee2e6;
-    --text: #212529;
-    --text-muted: #6c757d;
+@page {
+    size: A4;
+    margin: 16mm 12mm;
 }
-
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap');
 
 * {
     margin: 0;
@@ -31,160 +12,273 @@
 }
 
 body {
-    font-family: "Noto Sans SC", "Microsoft YaHei", "SimHei", sans-serif;
+    font-family: "Noto Sans SC", "Microsoft YaHei", "SimHei", -apple-system, system-ui, sans-serif;
     font-size: 10pt;
-    color: #212529;
+    color: #37352f;
     line-height: 1.6;
     background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
 }
 
 /* ── Header ── */
 .header {
-    background: #0f3460;
-    color: #fff;
-    padding: 32px 40px;
-    text-align: center;
+    padding: 0 0 20px;
+    border-bottom: 1px solid #e9e9e7;
+    margin-bottom: 20px;
 }
 
 .header h1 {
-    font-size: 22pt;
-    font-weight: 700;
+    font-size: 26pt;
+    font-weight: 800;
+    color: #37352f;
+    letter-spacing: -0.5px;
     margin-bottom: 6px;
-    letter-spacing: 1px;
+}
+
+.header-meta {
+    display: flex;
+    gap: 16px;
+    align-items: center;
 }
 
 .header .date {
     font-size: 11pt;
+    color: #787774;
+    font-weight: 500;
 }
 
 .header .stats {
-    margin-top: 10px;
-    font-size: 9pt;
+    font-size: 9.5pt;
+    color: #9b9a97;
 }
 
 /* ── Executive Summary ── */
-.summary {
-    margin: 24px 40px;
+.summary-section {
+    margin-bottom: 24px;
     padding: 16px 20px;
-    border-left: 4px solid #e94560;
-    background: #f8f9fa;
-    font-size: 10.5pt;
-    line-height: 1.8;
-    color: #212529;
+    background: #f7f6f3;
+    border-radius: 6px;
 }
 
-.summary-title {
+.summary-label {
     font-weight: 700;
-    font-size: 11pt;
-    margin-bottom: 6px;
-    color: #1a1a2e;
+    font-size: 10pt;
+    color: #37352f;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
-/* ── Sections ── */
+.summary-label::before {
+    content: "📋";
+}
+
+.summary-body {
+    font-size: 10pt;
+    color: #37352f;
+    line-height: 1.8;
+}
+
+/* ── Section ── */
 .section {
-    margin: 20px 40px;
+    margin-bottom: 24px;
     page-break-inside: avoid;
 }
 
 .section-header {
-    padding: 10px 16px;
-    background: #0f3460;
-    color: #fff;
-    font-size: 12pt;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 2px solid #37352f;
+    margin-bottom: 4px;
+}
+
+.section-icon {
+    font-size: 9pt;
+    color: #787774;
+    font-weight: 600;
+    background: #f1f1ef;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.section-title {
+    font-size: 13pt;
     font-weight: 700;
+    color: #37352f;
 }
 
-.section-header .icon {
-    font-size: 14pt;
-    margin-right: 8px;
-}
-
-.section-header .count {
+.section-count {
+    margin-left: auto;
     font-size: 9pt;
+    color: #9b9a97;
     font-weight: 400;
-    float: right;
 }
 
-/* ── Items Table ── */
-.items-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 9.5pt;
+/* ── Items ── */
+.items-list {
+    border: 1px solid #e9e9e7;
+    border-radius: 6px;
+    overflow: hidden;
 }
 
-.items-table thead th {
-    background: #1a1a2e;
-    color: #fff;
-    padding: 8px 10px;
-    text-align: left;
-    font-weight: 500;
-    font-size: 9pt;
+.item-card {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f1ef;
 }
 
-.items-table tbody tr.even-row {
-    background: #f8f9fa;
+.item-card:last-child {
+    border-bottom: none;
 }
 
-.items-table td {
-    padding: 8px 10px;
-    vertical-align: top;
-    border-bottom: 1px solid #dee2e6;
-    word-wrap: break-word;
+.item-card:nth-child(even) {
+    background: #fafaf9;
 }
 
-.items-table td a {
-    color: #0f3460;
+.item-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+/* Score badge */
+.item-score {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 11pt;
+    background: #e8f4f8;
+    color: #2eaadc;
+}
+
+.item-score-na {
+    background: #f1f1ef;
+    color: #9b9a97;
+    font-size: 10pt;
+}
+
+.item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.item-title-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.item-title {
+    font-weight: 600;
+    font-size: 10.5pt;
+    color: #37352f;
     text-decoration: none;
-    font-weight: 500;
+    line-height: 1.4;
 }
 
-.item-source {
-    display: block;
-    font-size: 8pt;
-    color: #6c757d;
+a.item-title:hover {
+    text-decoration: underline;
+}
+
+/* Content type badge */
+.item-type {
+    display: inline-block;
+    font-size: 7.5pt;
+    font-weight: 500;
+    padding: 1px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.item-type-news {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.item-type-analysis {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.item-type-report {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.item-type-blog {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.item-type-opensource {
+    background: #37352f;
+    color: #fff;
+}
+
+.item-meta {
+    font-size: 8.5pt;
+    color: #9b9a97;
     margin-top: 2px;
 }
 
-/* ── Tags ── */
+.item-summary {
+    font-size: 9.5pt;
+    color: #787774;
+    margin-top: 4px;
+    line-height: 1.5;
+}
+
+.item-tags {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
 .tag {
-    display: inline;
-    background: #e8edf3;
-    color: #0f3460;
-    padding: 1px 8px;
-    font-size: 8pt;
-    margin: 1px 2px;
+    display: inline-block;
+    background: #f1f1ef;
+    color: #787774;
+    padding: 1px 10px;
+    border-radius: 12px;
+    font-size: 7.5pt;
+    font-weight: 500;
 }
 
-/* ── Score ── */
-.score {
-    font-weight: 700;
-    color: #e94560;
-    font-size: 10pt;
-    text-align: center;
-}
-
-/* ── Source unavailable ── */
-.source-unavailable {
-    padding: 14px 16px;
-    color: #6c757d;
+/* ── Empty state ── */
+.empty-hint {
+    padding: 16px;
+    color: #9b9a97;
     font-style: italic;
-    background: #f8f9fa;
-    border: 1px dashed #dee2e6;
     text-align: center;
+    border: 1px dashed #e9e9e7;
+    border-radius: 6px;
+    font-size: 9.5pt;
 }
 
 /* ── Footer ── */
 .footer {
-    margin: 30px 40px 20px;
+    margin-top: 32px;
     padding: 12px 0;
-    border-top: 1px solid #dee2e6;
+    border-top: 1px solid #e9e9e7;
     text-align: center;
     font-size: 8pt;
-    color: #6c757d;
+    color: #9b9a97;
 }
 
 /* ── Print ── */
 @media print {
     body { background: #fff; }
     .section { page-break-inside: avoid; }
+    .item-card { page-break-inside: avoid; }
 }

@@ -27,8 +27,8 @@
       "github_trending": { "enabled": true, "language": "python", "max_items": 10 }
     },
     "llm": {
-      "summary_model": "gpt-5.2",
-      "processing_model": "gpt-5.2"
+      "summary_model": "gpt-5.4",
+      "processing_model": "gpt-5.4"
     },
     "pdf": {
       "template": "daily_report",

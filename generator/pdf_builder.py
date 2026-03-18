@@ -1,4 +1,4 @@
-"""PDF report generator — WeasyPrint with xhtml2pdf fallback."""
+"""PDF report generator — Playwright (Chromium) with xhtml2pdf fallback."""
 
 import os
 import re
@@ -13,13 +13,22 @@ from sources.models import ProcessedItem, SourceResult
 
 # Canonical section ordering and display config
 SECTION_CONFIG = OrderedDict([
-    ("Product Hunt",     {"icon": "[PH]",  "title": "Product Hunt"}),
-    ("Hacker News",      {"icon": "[HN]",  "title": "Hacker News"}),
-    ("RSS精选",          {"icon": "[RSS]", "title": "RSS精选 (Folo)"}),
-    ("arXiv",            {"icon": "[Ax]",  "title": "arXiv"}),
-    ("Reddit",           {"icon": "[Rd]",  "title": "Reddit"}),
-    ("GitHub Trending",  {"icon": "[GH]",  "title": "GitHub Trending"}),
+    ("Product Hunt",     {"icon": "PH",  "title": "Product Hunt"}),
+    ("Hacker News",      {"icon": "HN",  "title": "Hacker News"}),
+    ("RSS精选",          {"icon": "RSS", "title": "RSS精选 (Folo)"}),
+    ("arXiv",            {"icon": "Ax",  "title": "arXiv"}),
+    ("Reddit",           {"icon": "Rd",  "title": "Reddit"}),
+    ("GitHub Trending",  {"icon": "GH",  "title": "GitHub Trending"}),
 ])
+
+# Map content_type to CSS class suffix
+_CONTENT_TYPE_CLASS = {
+    "新闻": "news",
+    "深度分析": "analysis",
+    "技术报告": "report",
+    "博客/视频": "blog",
+    "开源项目": "opensource",
+}
 
 
 def _normalize_source(name: str) -> str:
@@ -29,79 +38,67 @@ def _normalize_source(name: str) -> str:
     return name
 
 
-def _render_pdf_weasyprint(html_content: str, templates_dir: str, pdf_path: str) -> None:
-    """Render PDF using WeasyPrint (requires GTK/Pango)."""
-    from weasyprint import HTML
-    HTML(string=html_content, base_url=templates_dir).write_pdf(pdf_path)
+def _render_pdf_playwright(html_content: str, pdf_path: str) -> None:
+    """Render PDF using Playwright Chromium — full CSS3 support."""
+    from playwright.sync_api import sync_playwright
 
-
-def _find_chinese_font() -> str | None:
-    """Find a Chinese font file on the system."""
-    candidates = []
-    # Windows fonts — prefer .ttf over .ttc for better compatibility
-    win_fonts = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts")
-    if os.path.isdir(win_fonts):
-        for name in ("simhei.ttf", "NotoSansSC-VF.ttf", "msyh.ttc", "simsun.ttc"):
-            p = os.path.join(win_fonts, name)
-            if os.path.isfile(p):
-                candidates.append(p)
-    # Linux fonts
-    for d in ("/usr/share/fonts", "/usr/local/share/fonts"):
-        if os.path.isdir(d):
-            for root, _, files in os.walk(d):
-                for f in files:
-                    if "notosanssc" in f.lower() or "notosanscjk" in f.lower() or "wqy" in f.lower():
-                        candidates.append(os.path.join(root, f))
-    return candidates[0] if candidates else None
-
-
-def _register_chinese_font() -> str:
-    """Register a Chinese font with reportlab and return the font family name."""
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-
-    font_path = _find_chinese_font()
-    if not font_path:
-        return "Helvetica"
-
-    font_name = "ChineseFont"
-    try:
-        if font_path.endswith(".ttc"):
-            # TTC (TrueType Collection) — use subfont index 0
-            pdfmetrics.registerFont(TTFont(font_name, font_path, subfontIndex=0))
-        else:
-            pdfmetrics.registerFont(TTFont(font_name, font_path))
-        return font_name
-    except Exception:
-        return "Helvetica"
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.set_content(html_content, wait_until="networkidle")
+        page.pdf(
+            path=pdf_path,
+            format="A4",
+            print_background=True,
+            margin={
+                "top": "16mm",
+                "bottom": "16mm",
+                "left": "14mm",
+                "right": "14mm",
+            },
+        )
+        browser.close()
 
 
 def _render_pdf_xhtml2pdf(html_content: str, templates_dir: str, pdf_path: str) -> None:
     """Render PDF using xhtml2pdf (pure-Python fallback)."""
     from xhtml2pdf import pisa
     from xhtml2pdf.default import DEFAULT_FONT
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
 
-    # Register Chinese font with reportlab and patch xhtml2pdf's font map
-    font_name = _register_chinese_font()
+    # Try to register a Chinese font
+    font_name = "Helvetica"
+    win_fonts = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts")
+    for name in ("simhei.ttf", "msyh.ttc", "simsun.ttc"):
+        fpath = os.path.join(win_fonts, name)
+        if os.path.isfile(fpath):
+            try:
+                if fpath.endswith(".ttc"):
+                    pdfmetrics.registerFont(TTFont("ChineseFont", fpath, subfontIndex=0))
+                else:
+                    pdfmetrics.registerFont(TTFont("ChineseFont", fpath))
+                font_name = "ChineseFont"
+                break
+            except Exception:
+                pass
+
     if font_name != "Helvetica":
         DEFAULT_FONT[font_name.lower()] = font_name
 
-    # xhtml2pdf needs the CSS inlined; it cannot follow <link> tags reliably.
+    # Inline the CSS
     css_path = Path(templates_dir) / "styles.css"
     if css_path.exists():
         css_text = css_path.read_text(encoding="utf-8")
-        # Remove @import and :root blocks (unsupported by xhtml2pdf)
         css_text = re.sub(r"@import\s+url\([^)]*\)\s*;", "", css_text)
         css_text = re.sub(r":root\s*\{[^}]*\}", "", css_text)
-
-        # Override body font to use registered Chinese font
         if font_name != "Helvetica":
-            css_text = css_text.replace(
-                'font-family: "Noto Sans SC", "Microsoft YaHei", "SimHei", sans-serif;',
+            css_text = re.sub(
+                r'font-family:[^;]+;',
                 f'font-family: {font_name};',
+                css_text,
+                count=1,
             )
-
-        # Replace the <link> tag with inline <style>
         html_content = html_content.replace(
             '<link rel="stylesheet" href="styles.css">',
             f"<style>{css_text}</style>",
@@ -131,6 +128,8 @@ def build_pdf(
         src = _normalize_source(item.original.source_name)
         if src not in grouped:
             grouped[src] = []
+
+        content_type = getattr(item, "content_type", "") or ""
         grouped[src].append({
             "title": item.original.title,
             "url": item.original.url,
@@ -138,6 +137,8 @@ def build_pdf(
             "one_line_summary": item.one_line_summary,
             "tags": item.tags,
             "score": item.original.score,
+            "content_type": content_type,
+            "content_type_class": _CONTENT_TYPE_CLASS.get(content_type, "news"),
         })
 
     # ── Build error lookup from source results ──
@@ -164,7 +165,7 @@ def build_pdf(
     for key in grouped:
         if key not in seen_sources:
             sections.append({
-                "icon": "[+]",
+                "icon": "+",
                 "title": key,
                 "entries": grouped[key],
                 "error": source_errors.get(key),
@@ -191,13 +192,10 @@ def build_pdf(
     out_path.mkdir(parents=True, exist_ok=True)
     pdf_path = str(out_path / "report.pdf")
 
-    # Try WeasyPrint first, fall back to xhtml2pdf
+    # Try Playwright first, fall back to xhtml2pdf
     try:
-        _render_pdf_weasyprint(html_content, templates_dir, pdf_path)
-    except (OSError, ImportError, Exception) as exc:
-        if "cannot load library" in str(exc) or isinstance(exc, (OSError, ImportError)):
-            _render_pdf_xhtml2pdf(html_content, templates_dir, pdf_path)
-        else:
-            raise
+        _render_pdf_playwright(html_content, pdf_path)
+    except Exception:
+        _render_pdf_xhtml2pdf(html_content, templates_dir, pdf_path)
 
     return pdf_path

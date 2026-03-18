@@ -29,6 +29,7 @@ class _ScoredItemLike(Protocol):
     original: _SourceItemLike
     score: int
     topic: str
+    content_type: str
     importance: str
     one_line_summary: str
     key_insight: str
@@ -66,6 +67,9 @@ def _content_blocks_for_item(item: _ScoredItemLike) -> list[dict[str, Any]]:
         blocks.append(_text_block(f"📌 {item.one_line_summary}"))
     if item.key_insight:
         blocks.append(_text_block(f"💡 {item.key_insight}"))
+    content_type = getattr(item, "content_type", "")
+    if content_type:
+        blocks.append(_text_block(f"📂 类型: {content_type}"))
     if item.tags:
         blocks.append(_text_block(f"🏷️ Tags: {', '.join(item.tags)}"))
     return blocks

@@ -59,12 +59,16 @@ class UserInterests:
     research_titles: list[str] = field(default_factory=list)
 
 
+VALID_CONTENT_TYPES = ["新闻", "深度分析", "技术报告", "博客/视频", "开源项目"]
+
+
 @dataclass
 class ScoredItem:
     """A source item with interest-relevance scoring."""
     original: SourceItem
     score: int = 5
     topic: str = ""
+    content_type: str = "新闻"  # 新闻/深度分析/技术报告/博客视频/开源项目
     importance: str = "中"
     one_line_summary: str = ""
     key_insight: str = ""
@@ -340,6 +344,7 @@ def _build_scoring_prompt(
     research_text = ", ".join(interests.research_titles[:30])
 
     valid_topics_text = " / ".join(VALID_TOPICS)
+    valid_types_text = " / ".join(VALID_CONTENT_TYPES)
 
     designated_section = ""
     if interests.designated_topic:
@@ -367,6 +372,7 @@ def _build_scoring_prompt(
         "- index: int (the [i] index from input)\n"
         "- score: int (1-10)\n"
         f"- topic: string (map to ONE of: {valid_topics_text})\n"
+        f"- content_type: string (map to ONE of: {valid_types_text})\n"
         "- one_line_summary: string (Chinese, 20-40 characters)\n"
         "- key_insight: string (one English sentence, the most important takeaway)\n"
         "- tags: array of 2-4 short tags\n"
@@ -437,12 +443,16 @@ async def score_items(
                         topic = entry.get("topic", "AI应用层")
                         if topic not in VALID_TOPICS:
                             topic = "AI应用层"
+                        ctype = entry.get("content_type", "新闻")
+                        if ctype not in VALID_CONTENT_TYPES:
+                            ctype = "新闻"
 
                         results.append(
                             ScoredItem(
                                 original=source_item,
                                 score=raw_score,
                                 topic=topic,
+                                content_type=ctype,
                                 importance=_importance_from_score(raw_score),
                                 one_line_summary=entry.get("one_line_summary", ""),
                                 key_insight=entry.get("key_insight", ""),

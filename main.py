@@ -213,6 +213,7 @@ async def run_pipeline(
                 "score": pi.original.score,
                 "interest_score": score_map[pi.original.url].score if pi.original.url in score_map else None,
                 "topic": score_map[pi.original.url].topic if pi.original.url in score_map else None,
+                "content_type": score_map[pi.original.url].content_type if pi.original.url in score_map else None,
             }
             for pi in processed
         ],
