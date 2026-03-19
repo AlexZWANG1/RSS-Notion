@@ -58,6 +58,7 @@ class ScoredItem:
     include: bool = False          # LLM decides: should this be in today's digest?
     topic: str = ""                # Free-form, LLM assigns
     content_type: str = ""         # Free-form, LLM assigns
+    source_category: str = ""      # LLM assigns: 科技媒体/AI技术社区/论文与评审/社交社区视频/官方一手/个人分析师/数据榜单基准/投资机构报告/独立研究机构
     importance: str = "中"         # LLM directly assigns 高/中/低
     one_line_summary: str = ""
     key_insight: str = ""
@@ -347,6 +348,11 @@ def _build_scoring_prompt(
         "- topic: string (assign a concise topic label that fits the content — "
         "use the reader's interest topics when appropriate, or create a fitting label)\n"
         "- content_type: string (classify freely, e.g. 新闻/深度分析/技术报告/博客/开源项目/论文/产品发布/行业动态/观点 — whatever fits best)\n"
+        "- source_category: string (classify the information source type. "
+        "MUST be one of: 科技媒体, AI技术社区, 论文与评审, 社交/社区/视频, 官方一手, 个人分析师, "
+        "数据/榜单/基准, 投资机构报告, 独立研究机构. "
+        "Judge by the actual source nature: e.g. arXiv→论文与评审, HN/Reddit→AI技术社区, "
+        "company blogs→官方一手, YouTube→社交/社区/视频, GitHub→数据/榜单/基准)\n"
         "- importance: string (高/中/低 — your editorial judgment of how important this is to the reader)\n"
         "- one_line_summary: string (Chinese, 20-40 characters, crisp and informative)\n"
         "- key_insight: string (one English sentence, the most important takeaway)\n"
@@ -419,6 +425,7 @@ async def score_items(
                                 include=bool(entry.get("include", False)),
                                 topic=entry.get("topic", ""),
                                 content_type=entry.get("content_type", ""),
+                                source_category=entry.get("source_category", ""),
                                 importance=importance,
                                 one_line_summary=entry.get("one_line_summary", ""),
                                 key_insight=entry.get("key_insight", ""),

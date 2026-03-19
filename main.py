@@ -18,6 +18,7 @@ from sources.reddit import RedditSource
 from sources.producthunt import ProductHuntSource
 from sources.github_trending import GitHubTrendingSource
 from sources.folo import FoloSource
+from sources.youtube import YouTubeSource
 from sources.models import SourceResult, PipelineResult
 from generator.interest_scorer import load_user_interests, score_items, filter_items
 from generator.summarizer import process_items_batch, generate_executive_summary
@@ -51,6 +52,7 @@ SOURCE_CLASSES = {
     "producthunt": ProductHuntSource,
     "github_trending": GitHubTrendingSource,
     "folo": FoloSource,
+    "youtube": YouTubeSource,
 }
 
 
@@ -285,6 +287,7 @@ async def run_pipeline(
                 "interest_score": score_map[pi.original.url].score if pi.original.url in score_map else None,
                 "topic": score_map[pi.original.url].topic if pi.original.url in score_map else None,
                 "content_type": score_map[pi.original.url].content_type if pi.original.url in score_map else None,
+                "source_category": score_map[pi.original.url].source_category if pi.original.url in score_map else None,
             }
             for pi in processed
         ],

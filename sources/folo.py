@@ -55,29 +55,32 @@ class FoloSource(BaseSource):
         return None
 
     def _query_notion(self, token: str, database_id: str) -> list[dict]:
-        """Synchronous Notion SDK call — will be run in an executor."""
-        from notion_client import Client
-
-        notion = Client(auth=token)
+        """Query Notion database via raw HTTP (notion-client v3 removed databases.query)."""
+        import httpx
 
         today_str = date.today().isoformat()
 
-        response = notion.databases.query(
-            database_id=database_id,
-            filter={
-                "and": [
-                    {
-                        "property": "来源",
-                        "select": {"equals": "RSS精选"},
-                    },
-                    {
-                        "property": "收录时间",
-                        "date": {"equals": today_str},
-                    },
-                ]
+        response = httpx.post(
+            f"https://api.notion.com/v1/databases/{database_id}/query",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json",
             },
+            json={
+                "filter": {
+                    "and": [
+                        {
+                            "property": "收录时间",
+                            "date": {"equals": today_str},
+                        },
+                    ]
+                },
+            },
+            timeout=20.0,
         )
-        return response.get("results", [])
+        response.raise_for_status()
+        return response.json().get("results", [])
 
     def _parse_page(self, page: dict) -> SourceItem | None:
         """Convert a single Notion page into a SourceItem."""

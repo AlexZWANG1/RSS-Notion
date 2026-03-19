@@ -24,7 +24,18 @@
       "arxiv": { "enabled": true, "categories": ["cs.AI", "cs.CL", "cs.LG"], "max_items": 20 },
       "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
       "producthunt": { "enabled": true, "max_items": 10 },
-      "github_trending": { "enabled": true, "language": "python", "max_items": 10 }
+      "github_trending": { "enabled": true, "language": "python", "max_items": 10 },
+      "youtube": {
+        "enabled": true,
+        "max_items": 15,
+        "max_age_days": 3,
+        "channels": [
+          { "channel_id": "UCMLtBahI5DMrt0NPvDSoIRQ", "name": "No Priors" },
+          { "channel_id": "UC4QZ_LsYcvcq7qOsOhpAI4A", "name": "a16z" },
+          { "channel_id": "UCSHZKyawb77ixDdsGog4iWA", "name": "Lex Fridman" },
+          { "channel_id": "UCMkEtvaoih9HJHuCPxLEEKg", "name": "Dwarkesh Patel" }
+        ]
+      }
     },
     "llm": {
       "summary_model": "gpt-5.4",

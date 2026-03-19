@@ -30,6 +30,7 @@ class _ScoredItemLike(Protocol):
     score: int
     topic: str
     content_type: str
+    source_category: str
     importance: str
     one_line_summary: str
     key_insight: str
@@ -93,21 +94,29 @@ def _build_item_properties(
     today: str,
     url: str | None = None,
     media_source: str | None = None,
+    summary: str | None = None,
+    insight: str | None = None,
+    score: int | None = None,
 ) -> dict[str, Any]:
     """Build the *properties* dict for a Notion page."""
     props: dict[str, Any] = {
         "名称": {"title": [{"text": {"content": title}}]},
         "来源": {"select": {"name": source}},
-        "状态": {"select": {"name": "未读"}},
         "重要性": {"select": {"name": importance}},
         "收录时间": {"date": {"start": today}},
     }
+    if score is not None:
+        props["评分"] = {"number": score}
     if topic:
         props["话题"] = {"multi_select": [{"name": topic}]}
     if url:
         props["原文链接"] = {"url": url}
     if media_source:
         props["媒体来源"] = {"rich_text": [{"text": {"content": media_source}}]}
+    if summary:
+        props["摘要"] = {"rich_text": [{"text": {"content": summary[:2000]}}]}
+    if insight:
+        props["洞察"] = {"rich_text": [{"text": {"content": insight[:2000]}}]}
     return props
 
 
@@ -171,8 +180,15 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 logger.info("Skipping duplicate: %s", title)
                 continue
 
-            # Determine source label
-            source_label = "AI生成" if item.original.source_name in ("AI生成", "research") else "RSS精选"
+            # Use LLM-assigned source category, fallback to AI技术社区
+            _VALID_CATEGORIES = {
+                "科技媒体", "AI技术社区", "论文与评审", "社交/社区/视频",
+                "官方一手", "个人分析师", "数据/榜单/基准", "投资机构报告",
+                "独立研究机构", "系统", "手动",
+            }
+            source_label = getattr(item, "source_category", "") or ""
+            if source_label not in _VALID_CATEGORIES:
+                source_label = "AI技术社区"
 
             properties = _build_item_properties(
                 title=title,
@@ -182,6 +198,9 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 today=today,
                 url=item.original.url,
                 media_source=item.original.source_name,
+                summary=item.one_line_summary,
+                insight=item.key_insight,
+                score=item.score,
             )
             children = _content_blocks_for_item(item)
 

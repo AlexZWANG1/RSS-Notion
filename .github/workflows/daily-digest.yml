@@ -1,11 +1,12 @@
 name: AI Daily Digest
 
 on:
-  schedule:
-    # 08:00 UTC+8 = 00:00 UTC
-    - cron: '0 0 * * *'
-    # 18:00 UTC+8 = 10:00 UTC
-    - cron: '0 10 * * *'
+  # DISABLED: re-enable after configuring GitHub Secrets
+  # schedule:
+  #   # 08:00 UTC+8 = 00:00 UTC
+  #   - cron: '0 0 * * *'
+  #   # 18:00 UTC+8 = 10:00 UTC
+  #   - cron: '0 10 * * *'
   workflow_dispatch:
 
 jobs:
