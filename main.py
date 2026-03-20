@@ -28,6 +28,7 @@ from delivery.notion_writer import (
     write_scored_items_to_notion,
     write_research_report_to_notion,
     write_run_report_to_notion,
+    cleanup_inbox,
 )
 
 # Configure logging
@@ -307,6 +308,17 @@ async def run_pipeline(
     else:
         logger.info("Phase 6: Email skipped (--skip-email)")
 
+    # --- Phase 7: Inbox Cleanup ---
+    if not skip_notion:
+        logger.info("Phase 7: Cleaning up inbox...")
+        cleanup_stats = await cleanup_inbox(retention_days=3)
+        logger.info(
+            f"  Cleanup: {cleanup_stats['archived']} archived, "
+            f"{cleanup_stats['deleted']} deleted, {cleanup_stats['skipped']} skipped"
+        )
+    else:
+        logger.info("Phase 7: Inbox cleanup skipped (--skip-notion)")
+
     # --- Done ---
     logger.info("=" * 50)
     logger.info(f"Pipeline complete! PDF: {pdf_path}")
@@ -338,7 +350,16 @@ def main():
              "(e.g. 'AI Agent, LLM inference, SaaS'). "
              "Overrides Notion config page.",
     )
+    parser.add_argument(
+        "--cleanup-only", action="store_true",
+        help="Only run inbox cleanup (archive starred, delete expired), skip pipeline",
+    )
     args = parser.parse_args()
+
+    if args.cleanup_only:
+        stats = asyncio.run(cleanup_inbox(retention_days=3))
+        print(f"Cleanup done: {stats['archived']} archived, {stats['deleted']} deleted, {stats['skipped']} skipped")
+        sys.exit(0)
 
     only_sources = args.sources.split(",") if args.sources else None
 
