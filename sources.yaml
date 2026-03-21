@@ -26,3 +26,4 @@ search:
     - { site: "menlovc.com", name: "Menlo Ventures" }
     - { site: "metr.org", name: "METR" }
     - { site: "lmarena.ai", name: "Chatbot Arena" }
+    - { site: "x.com", name: "X/Twitter" }

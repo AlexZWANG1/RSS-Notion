@@ -288,6 +288,27 @@ async def run_pipeline(
         written = await write_scored_items_to_notion(selected, today)
         logger.info(f"  Wrote {written} items to Notion inbox")
 
+        # Write executive summary as a digest report
+        digest_content = (
+            f"📈 AI 产业日报 — {today}\n\n"
+            f"今日扫描 {len(all_items)} 条内容，精选 {len(selected)} 条。\n\n"
+            f"{'='*40}\n\n"
+            f"{summary}\n\n"
+            f"{'='*40}\n\n"
+            "📋 精选列表\n" +
+            "\n".join(
+                f"{i+1}. [{s.source_tier}类|{s.importance}] {s.original.title}\n"
+                f"   {s.one_line_summary}"
+                for i, s in enumerate(selected)
+            )
+        )
+        await write_research_report_to_notion(
+            title=f"AI 产业日报",
+            content=digest_content,
+            topic="AI 日报",
+            today=today,
+        )
+
         # Write run report (enriched with editorial details)
         run_summary = _build_run_summary(
             all_items, selected, scored, source_results, summary, threshold

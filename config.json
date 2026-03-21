@@ -41,12 +41,12 @@
       "youtube": {
         "enabled": true,
         "max_items": 15,
-        "max_age_days": 3,
+        "max_age_days": 7,
         "channels": [
           { "channel_id": "UCMLtBahI5DMrt0NPvDSoIRQ", "name": "No Priors" },
           { "channel_id": "UCSHZKyawb77ixDdsGog4iWA", "name": "Lex Fridman" },
-          { "channel_id": "UCWN3xxRkmTPphwS7aL2o8KA", "name": "AI Explained" },
-          { "channel_id": "UCbfYPyITQ-7l4upoX8nvctg", "name": "Two Minute Papers" }
+          { "channel_id": "UCbfYPyITQ-7l4upoX8nvctg", "name": "Two Minute Papers" },
+          { "channel_id": "UCsBjURrPoezykLs9EqgamOA", "name": "Fireship" }
         ]
       }
     },
