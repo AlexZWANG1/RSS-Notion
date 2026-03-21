@@ -20,10 +20,10 @@
   "pipeline": {
     "sources": {
       "folo": { "enabled": true },
-      "hackernews": { "enabled": true, "max_items": 10 },
+      "hackernews": { "enabled": true, "max_items": 30 },
       "arxiv": { "enabled": true, "categories": ["cs.AI", "cs.CL", "cs.LG"], "max_items": 20 },
       "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
-      "producthunt": { "enabled": true, "max_items": 10 },
+      "producthunt": { "enabled": false, "max_items": 10 },
       "github_trending": { "enabled": true, "language": "python", "max_items": 10 },
       "rss": { "enabled": true, "max_items": 50, "max_age_days": 3 },
       "tavily": {
@@ -51,9 +51,9 @@
         "max_age_days": 3,
         "channels": [
           { "channel_id": "UCMLtBahI5DMrt0NPvDSoIRQ", "name": "No Priors" },
-          { "channel_id": "UC4QZ_LsYcvcq7qOsOhpAI4A", "name": "a16z" },
           { "channel_id": "UCSHZKyawb77ixDdsGog4iWA", "name": "Lex Fridman" },
-          { "channel_id": "UCMkEtvaoih9HJHuCPxLEEKg", "name": "Dwarkesh Patel" }
+          { "channel_id": "UCWN3xxRkmTPphwS7aL2o8KA", "name": "AI Explained" },
+          { "channel_id": "UCbfYPyITQ-7l4upoX8nvctg", "name": "Two Minute Papers" }
         ]
       }
     },

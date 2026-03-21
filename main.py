@@ -24,7 +24,7 @@ from sources.rss_fetcher import RSSFetcher
 from sources.tavily_search import TavilySearchSource
 from sources.models import SourceResult, PipelineResult
 from generator.interest_scorer import load_user_interests, load_user_feedback, score_items, filter_items
-from generator.summarizer import process_items_batch, generate_executive_summary
+from generator.summarizer import generate_executive_summary
 from generator.pdf_builder import build_pdf
 from delivery.emailer import send_report_email
 from delivery.notion_writer import (
@@ -261,11 +261,21 @@ async def run_pipeline(
     included_count = sum(1 for s in scored if s.include)
     logger.info(f"  LLM included {included_count} items, final selected {len(selected)}")
 
-    # Also do the old-style processing for PDF compatibility
-    processed = await process_items_batch(all_items, model=model)
+    # Build processed items from scored items (no extra LLM call)
+    from sources.models import ProcessedItem
+    processed = [
+        ProcessedItem(
+            original=s.original,
+            one_line_summary=s.one_line_summary,
+            category=s.topic,
+            relevance="high" if s.importance == "高" else ("medium" if s.importance == "中" else "low"),
+            key_insight=s.key_insight,
+        )
+        for s in scored
+    ]
     result.processed_items = processed
 
-    # Executive summary (use scored items for richer context)
+    # Executive summary
     logger.info("Generating executive summary...")
     summary = await generate_executive_summary(processed, model=summary_model)
     result.executive_summary = summary
