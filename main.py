@@ -19,6 +19,7 @@ from sources.producthunt import ProductHuntSource
 from sources.github_trending import GitHubTrendingSource
 from sources.folo import FoloSource
 from sources.youtube import YouTubeSource
+from sources.xiaohongshu import XiaohongshuSource
 from sources.models import SourceResult, PipelineResult
 from generator.interest_scorer import load_user_interests, score_items, filter_items
 from generator.summarizer import process_items_batch, generate_executive_summary
@@ -54,6 +55,7 @@ SOURCE_CLASSES = {
     "github_trending": GitHubTrendingSource,
     "folo": FoloSource,
     "youtube": YouTubeSource,
+    "xiaohongshu": XiaohongshuSource,
 }
 
 
@@ -63,10 +65,37 @@ def _build_run_summary(all_items, selected, scored, source_results, summary, thr
         f"  - {sr.source_name}: {len(sr.items)}条" + (f" (错误: {sr.error})" if sr.error else "")
         for sr in source_results
     )
+
+    # All received items grouped by source
+    received_by_source: dict[str, list] = {}
+    for item in all_items:
+        src = item.source_name
+        received_by_source.setdefault(src, []).append(item)
+    received_lines = []
+    for src, items in received_by_source.items():
+        received_lines.append(f"  【{src}】({len(items)}条)")
+        for item in items:
+            received_lines.append(f"    · {item.title}")
+    received_text = "\n".join(received_lines)
+
+    # Excluded items (scored but not selected)
+    selected_urls = {s.original.url for s in selected}
+    excluded = [s for s in scored if s.original.url not in selected_urls]
+
+    # Selected items with reasons
     selected_list = "\n".join(
-        f"  {i+1}. [{s.importance}] {s.original.title} — {s.one_line_summary}"
+        f"  {i+1}. [{s.importance}|{s.score}分] {s.original.title}\n"
+        f"      摘要: {s.one_line_summary}\n"
+        f"      入选理由: {s.score_reason}"
         for i, s in enumerate(selected)
     )
+
+    # Excluded items (brief)
+    excluded_list = "\n".join(
+        f"  · [{s.score}分] {s.original.title} — {s.score_reason}"
+        for s in sorted(excluded, key=lambda x: x.score, reverse=True)[:20]
+    )
+
     topic_counts: dict[str, int] = {}
     for s in selected:
         topic_counts[s.topic] = topic_counts.get(s.topic, 0) + 1
@@ -74,10 +103,12 @@ def _build_run_summary(all_items, selected, scored, source_results, summary, thr
 
     return (
         f"📊 处理统计\n"
-        f"抓取 {len(all_items)} 条 → AI编辑筛选 → 入选 {len(selected)} 条\n\n"
+        f"抓取 {len(all_items)} 条 → AI编辑筛选 {len(scored)} 条 → 入选 {len(selected)} 条 (淘汰 {len(excluded)} 条)\n\n"
         f"📡 数据源\n{source_stats}\n\n"
+        f"📥 全部接收内容 ({len(all_items)}条)\n{received_text}\n\n"
         f"🏷️ 话题分布: {topic_dist}\n\n"
-        f"📋 入选内容\n{selected_list}\n\n"
+        f"✅ 入选内容 ({len(selected)}条)\n{selected_list}\n\n"
+        f"❌ 未入选内容 (展示前20条)\n{excluded_list}\n\n"
         f"💡 核心发现\n{summary}"
     )
 

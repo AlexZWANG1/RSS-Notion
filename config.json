@@ -11,8 +11,8 @@
   "schedule": {
     "times": ["08:00", "18:00"],
     "max_rss_articles": 100,
-    "relevance_threshold": 7,
-    "max_selected": 15
+    "relevance_threshold": 5,
+    "max_selected": 25
   },
   "folo": {
     "session_token_env": "FOLO_SESSION_TOKEN"
@@ -25,6 +25,12 @@
       "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
       "producthunt": { "enabled": true, "max_items": 10 },
       "github_trending": { "enabled": true, "language": "python", "max_items": 10 },
+      "xiaohongshu": {
+        "enabled": true,
+        "max_items": 10,
+        "mcp_url": "http://localhost:18060/mcp",
+        "keywords": ["AI", "大模型", "人工智能", "LLM", "Agent"]
+      },
       "youtube": {
         "enabled": true,
         "max_items": 15,

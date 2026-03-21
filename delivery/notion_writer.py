@@ -71,6 +71,9 @@ def _content_blocks_for_item(item: _ScoredItemLike) -> list[dict[str, Any]]:
         blocks.append(_text_block(f"📌 {item.one_line_summary}"))
     if item.key_insight:
         blocks.append(_text_block(f"💡 {item.key_insight}"))
+    score_reason = getattr(item, "score_reason", "")
+    if score_reason:
+        blocks.append(_text_block(f"✅ 入选理由: {score_reason}"))
     content_type = getattr(item, "content_type", "")
     if content_type:
         blocks.append(_text_block(f"📂 类型: {content_type}"))
@@ -79,13 +82,16 @@ def _content_blocks_for_item(item: _ScoredItemLike) -> list[dict[str, Any]]:
     return blocks
 
 
-def _content_blocks_for_text(content: str) -> list[dict[str, Any]]:
-    """Split a long text into paragraph blocks (one per line)."""
+def _content_blocks_for_text(content: str, max_blocks: int = 95) -> list[dict[str, Any]]:
+    """Split a long text into paragraph blocks (one per line), capped at max_blocks."""
     blocks: list[dict[str, Any]] = []
     for line in content.split("\n"):
         line = line.strip()
         if line:
             blocks.append(_text_block(line))
+            if len(blocks) >= max_blocks:
+                blocks.append(_text_block("⚠️ 内容已截断（Notion 限制 100 blocks）"))
+                break
     return blocks or [_text_block(content[:_MAX_BLOCK_LEN])]
 
 
@@ -99,17 +105,21 @@ def _build_item_properties(
     media_source: str | None = None,
     summary: str | None = None,
     insight: str | None = None,
-    score: int | None = None,
+    selection_reason: str | None = None,
 ) -> dict[str, Any]:
     """Build the *properties* dict for a Notion page."""
+    # Make title a clickable link to the original article when URL is available
+    title_rt: dict[str, Any] = {"content": title}
+    if url:
+        title_rt["link"] = {"url": url}
     props: dict[str, Any] = {
-        "名称": {"title": [{"text": {"content": title}}]},
+        "名称": {"title": [{"text": title_rt}]},
         "来源": {"select": {"name": source}},
         "重要性": {"select": {"name": importance}},
         "收录时间": {"date": {"start": today}},
     }
-    if score is not None:
-        props["评分"] = {"number": score}
+    if selection_reason:
+        props["入选理由"] = {"rich_text": [{"text": {"content": selection_reason[:2000]}}]}
     if topic:
         props["话题"] = {"multi_select": [{"name": topic}]}
     if url:
@@ -203,7 +213,7 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 media_source=item.original.source_name,
                 summary=item.one_line_summary,
                 insight=item.key_insight,
-                score=item.score,
+                selection_reason=getattr(item, "score_reason", ""),
             )
             children = _content_blocks_for_item(item)
 

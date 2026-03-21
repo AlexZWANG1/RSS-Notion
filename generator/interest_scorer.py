@@ -332,12 +332,17 @@ def _build_scoring_prompt(
 
         "## Your editorial criteria\n"
         "Think like a thoughtful human editor, not a keyword matcher:\n"
-        "- **Include** items that would make the reader stop scrolling — genuinely valuable, "
-        "surprising, or actionable for someone with these interests\n"
-        "- **Exclude** routine announcements, tangential topics, papers with no practical relevance, "
-        "and anything the reader would skip past\n"
-        "- Prefer quality over quantity — it's OK to include only 2-3 items from a batch of 15\n"
-        "- Consider: Would a smart colleague forward this to the reader? If not, exclude it.\n\n"
+        "- The reader is a **product strategist and investor**, not a developer or consumer. "
+        "They care about: industry dynamics, business model shifts, competitive moats, "
+        "product strategy, funding signals, and platform plays — NOT tutorials, how-to guides, "
+        "or consumer lifestyle content.\n"
+        "- **Include** items with genuine strategic signal: new product launches with market implications, "
+        "founder/CEO first-hand insights, industry inflection points, open-source projects that shift "
+        "competitive dynamics, investment trends, and deep analyses with original thinking.\n"
+        "- **Exclude** beginner tutorials, 'how to use X' guides, consumer content (fashion/lifestyle/tips), "
+        "routine paper summaries with no practical relevance, and hype without substance.\n"
+        "- Cast a reasonably wide net — include 6-10 items per batch. When in doubt about strategic "
+        "relevance, include it. But don't include obvious noise.\n\n"
 
         "## Output format\n"
         "Return a JSON object with a single key \"items\" whose value is an array. "
@@ -354,7 +359,9 @@ def _build_scoring_prompt(
         "Judge by the actual source nature: e.g. arXiv→论文与评审, HN/Reddit→AI技术社区, "
         "company blogs→官方一手, YouTube→社交/社区/视频, GitHub→数据/榜单/基准)\n"
         "- importance: string (高/中/低 — your editorial judgment of how important this is to the reader)\n"
-        "- one_line_summary: string (Chinese, 20-40 characters, crisp and informative)\n"
+        "- one_line_summary: string (Chinese, 50-100 characters — not just a headline, "
+        "include essential background context and the core viewpoint/finding. "
+        "Example: '谷歌发布Gemini 2.0，首次支持原生多模态输出和AI Agent调用工具，标志着从信息检索向任务执行的范式转变')\n"
         "- key_insight: string (one English sentence, the most important takeaway)\n"
         "- tags: array of 2-4 short tags\n"
         "- score_reason: string (1-2 sentences explaining your editorial decision)\n\n"
@@ -453,14 +460,14 @@ def filter_items(
     """Filter items based on LLM's editorial decision.
 
     Primary filter: LLM's include=True decision.
-    Fallback: if LLM includes too few (<3), also add items with score >= threshold.
+    Fallback: if LLM includes too few (<5), also add items with score >= threshold.
     Safety cap: max_items prevents runaway output.
     """
     # Primary: LLM's editorial picks
     included = [s for s in scored if s.include]
 
-    # Fallback: if LLM was too conservative, add high-scoring items
-    if len(included) < 3:
+    # Fallback: if LLM was still too conservative, add high-scoring items
+    if len(included) < 5:
         above_threshold = [s for s in scored if not s.include and s.score >= threshold]
         above_threshold.sort(key=lambda s: s.score, reverse=True)
         included.extend(above_threshold)
