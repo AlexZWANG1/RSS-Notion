@@ -1,0 +1,24 @@
+rss:
+  - { name: "OpenAI News", url: "https://openai.com/news/rss.xml", category: "官方一手" }
+  - { name: "Anthropic News", url: "https://raw.githubusercontent.com/AntonioCiolworthy/anthropic-rss/main/feed.xml", category: "官方一手" }
+  - { name: "Google DeepMind", url: "https://deepmind.google/blog/rss.xml", category: "官方一手" }
+  - { name: "Google Research", url: "https://blog.research.google/feeds/posts/default?alt=rss", category: "官方一手" }
+  - { name: "Microsoft Research", url: "https://www.microsoft.com/en-us/research/feed/", category: "官方一手" }
+  - { name: "HuggingFace Blog", url: "https://huggingface.co/blog/feed.xml", category: "AI技术社区" }
+  - { name: "a16z", url: "https://a16z.com/feed/", category: "投资机构" }
+  - { name: "Semianalysis", url: "https://semianalysis.com/feed/", category: "独立研究" }
+  - { name: "Epoch AI", url: "https://epochai.org/blog/rss.xml", category: "独立研究" }
+  - { name: "Sequoia Capital", url: "https://www.sequoiacap.com/feed/", category: "投资机构" }
+  - { name: "Menlo Ventures", url: "https://menlovc.com/feed/", category: "投资机构" }
+
+search:
+  enabled: true
+  provider: tavily
+  max_age_days: 3
+  queries:
+    - "AI agent infrastructure startup"
+    - "LLM inference cost breakthrough"
+    - "AI startup funding round"
+    - "foundation model product launch"
+    - "AI competitive landscape analysis"
+  max_per_query: 10

@@ -25,6 +25,20 @@
       "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
       "producthunt": { "enabled": true, "max_items": 10 },
       "github_trending": { "enabled": true, "language": "python", "max_items": 10 },
+      "rss": { "enabled": true, "max_items": 50, "max_age_days": 3 },
+      "tavily": {
+        "enabled": true,
+        "max_items": 30,
+        "max_age_days": 3,
+        "queries": [
+          "AI agent infrastructure startup",
+          "LLM inference cost breakthrough",
+          "AI startup funding round 2026",
+          "foundation model product launch",
+          "AI competitive landscape analysis"
+        ],
+        "max_per_query": 8
+      },
       "xiaohongshu": {
         "enabled": true,
         "max_items": 10,

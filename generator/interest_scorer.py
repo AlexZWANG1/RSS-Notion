@@ -58,12 +58,22 @@ class ScoredItem:
     include: bool = False          # LLM decides: should this be in today's digest?
     topic: str = ""                # Free-form, LLM assigns
     content_type: str = ""         # Free-form, LLM assigns
-    source_category: str = ""      # LLM assigns: 科技媒体/AI技术社区/论文与评审/社交社区视频/官方一手/个人分析师/数据榜单基准/投资机构报告/独立研究机构
+    source_category: str = ""      # LLM assigns
+    source_tier: str = ""          # A/B/C/D/E information tier
     importance: str = "中"         # LLM directly assigns 高/中/低
     one_line_summary: str = ""
     key_insight: str = ""
     tags: list[str] = field(default_factory=list)
     score_reason: str = ""
+    event_cluster: str = ""        # Group duplicate coverage of same event
+
+
+@dataclass
+class UserFeedback:
+    """Recent user behavior signals from Notion."""
+    favorited: list[str] = field(default_factory=list)   # titles user starred
+    ignored: list[str] = field(default_factory=list)     # titles user skipped
+    deep_read: list[str] = field(default_factory=list)   # titles marked for deep read
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +241,75 @@ def _fetch_research_titles(notion, database_id: str) -> list[str]:
     return titles
 
 
+def _fetch_recent_feedback(notion, database_id: str, days: int = 7) -> UserFeedback:
+    """Fetch recent user behavior from Notion inbox/archive for feedback loop."""
+    from datetime import date, timedelta
+    import httpx
+
+    feedback = UserFeedback()
+    token = os.environ.get("NOTION_TOKEN", "")
+    if not token:
+        return feedback
+
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+
+    try:
+        # Query recent pages with 收录时间 in last N days
+        resp = httpx.post(
+            f"https://api.notion.com/v1/databases/{database_id}/query",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json",
+            },
+            json={
+                "filter": {
+                    "property": "收录时间",
+                    "date": {"on_or_after": cutoff},
+                },
+                "page_size": 100,
+            },
+            timeout=20.0,
+        )
+        resp.raise_for_status()
+
+        for page in resp.json().get("results", []):
+            props = page.get("properties", {})
+
+            # Extract title
+            title_parts = props.get("名称", {}).get("title", [])
+            title = "".join(t.get("plain_text", "") for t in title_parts)
+            # Strip [AI精选] prefix for cleaner matching
+            title = title.replace("[AI精选] ", "").replace("[AI研究] ", "")
+
+            if not title or title.startswith("[运行报告]"):
+                continue
+
+            # Check 选择 (收藏/不收藏)
+            choice_sel = props.get("选择", {}).get("select")
+            choice = choice_sel["name"] if choice_sel else ""
+
+            # Check 待深度阅读
+            deep_read = props.get("待深度阅读", {}).get("checkbox", False)
+
+            if choice == "收藏":
+                feedback.favorited.append(title)
+            elif choice == "不收藏":
+                feedback.ignored.append(title)
+
+            if deep_read:
+                feedback.deep_read.append(title)
+
+    except Exception as exc:
+        logger.warning("Failed to fetch user feedback: %s", exc)
+
+    logger.info(
+        "Loaded feedback: %d favorited, %d ignored, %d deep-read",
+        len(feedback.favorited), len(feedback.ignored), len(feedback.deep_read),
+    )
+    return feedback
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -295,9 +374,10 @@ async def load_user_interests(config: dict | None = None) -> UserInterests:
 
 
 def _build_scoring_prompt(
-    items: list[SourceItem], interests: UserInterests
+    items: list[SourceItem], interests: UserInterests,
+    feedback: UserFeedback | None = None,
 ) -> str:
-    """Build the LLM editorial curation prompt for a batch of items."""
+    """Build the LLM strategic curation prompt for a batch of items."""
     entries = []
     for i, item in enumerate(items):
         entries.append(
@@ -310,63 +390,92 @@ def _build_scoring_prompt(
 
     topics_text = ", ".join(interests.topics)
     keywords_text = ", ".join(interests.keywords[:50])
-    research_text = ", ".join(interests.research_titles[:30])
 
     designated_section = ""
     if interests.designated_topic:
         designated_section = (
             f"\n**今日指定课题**: {interests.designated_topic}\n"
-            "Items directly related to the designated topic should be strongly favored for inclusion.\n"
+            "与指定课题直接相关的内容应强烈倾向入选。\n"
         )
 
+    # Build feedback section from real user behavior
+    feedback_section = ""
+    if feedback and (feedback.favorited or feedback.ignored):
+        fb_lines = []
+        if feedback.favorited:
+            fb_lines.append("读者最近收藏（认为有价值）的内容：")
+            for t in feedback.favorited[:15]:
+                fb_lines.append(f"  ✅ {t}")
+        if feedback.deep_read:
+            fb_lines.append("读者标记深度阅读的内容：")
+            for t in feedback.deep_read[:10]:
+                fb_lines.append(f"  📖 {t}")
+        if feedback.ignored:
+            fb_lines.append("读者忽略（不感兴趣）的内容：")
+            for t in feedback.ignored[:15]:
+                fb_lines.append(f"  ❌ {t}")
+        fb_lines.append(
+            "从这些真实行为中学习读者的偏好模式，用于校准你的选择。"
+        )
+        feedback_section = "\n## 读者最近的真实行为（最重要的校准信号）\n" + "\n".join(fb_lines) + "\n"
+
     return (
-        "You are an editorial curator for a personalized AI daily digest. "
-        "Your job is to decide which items are worth the reader's time today.\n\n"
+        "你是一个面向 AI 产业战略决策者的信息策展人。\n\n"
 
-        "## Reader Profile\n"
-        f"**Perspective**: {interests.perspective}\n"
-        f"**Long-term interests**: {topics_text}\n"
-        f"**Keywords they track**: {keywords_text}\n"
-        f"**Existing research topics**: {research_text}\n"
+        "## 读者画像\n"
+        f"**视角**: {interests.perspective}\n"
+        f"**长期关注**: {topics_text}\n"
+        f"**追踪关键词**: {keywords_text}\n"
         f"{designated_section}\n"
+        "这位读者是产品策略师和投资者。他不需要知道「发生了什么」——"
+        "他需要知道「这意味着什么」和「谁在一手推动这件事」。\n"
+        f"{feedback_section}\n"
 
-        "## Your editorial criteria\n"
-        "Think like a thoughtful human editor, not a keyword matcher:\n"
-        "- The reader is a **product strategist and investor**, not a developer or consumer. "
-        "They care about: industry dynamics, business model shifts, competitive moats, "
-        "product strategy, funding signals, and platform plays — NOT tutorials, how-to guides, "
-        "or consumer lifestyle content.\n"
-        "- **Include** items with genuine strategic signal: new product launches with market implications, "
-        "founder/CEO first-hand insights, industry inflection points, open-source projects that shift "
-        "competitive dynamics, investment trends, and deep analyses with original thinking.\n"
-        "- **Exclude** beginner tutorials, 'how to use X' guides, consumer content (fashion/lifestyle/tips), "
-        "routine paper summaries with no practical relevance, and hype without substance.\n"
-        "- Cast a reasonably wide net — include 6-10 items per batch. When in doubt about strategic "
-        "relevance, include it. But don't include obvious noise.\n\n"
+        "## 信息层级（你的核心判断维度）\n"
+        "对每条内容判断其信息层级：\n"
+        "- **A. 一手信息**：创始人/CEO亲自写的、官方公告、原始研究报告、投资人自己的判断\n"
+        "- **B. 深度分析**：有原创观点的分析文章（不是转述别人的观点）\n"
+        "- **C. 二手报道**：媒体对事件的报道、总结、转述\n"
+        "- **D. 社区讨论**：Reddit/HN/小红书上的讨论帖、问答\n"
+        "- **E. 教程/工具**：how-to、入门指南、工具推荐、消费者内容\n\n"
 
-        "## Output format\n"
-        "Return a JSON object with a single key \"items\" whose value is an array. "
-        "Each element must have:\n"
-        "- index: int (the [i] index from input)\n"
-        "- include: boolean (your editorial decision — should this be in today's digest?)\n"
-        "- score: int (1-10, your confidence in the recommendation)\n"
-        "- topic: string (assign a concise topic label that fits the content — "
-        "use the reader's interest topics when appropriate, or create a fitting label)\n"
-        "- content_type: string (classify freely, e.g. 新闻/深度分析/技术报告/博客/开源项目/论文/产品发布/行业动态/观点 — whatever fits best)\n"
-        "- source_category: string (classify the information source type. "
-        "MUST be one of: 科技媒体, AI技术社区, 论文与评审, 社交/社区/视频, 官方一手, 个人分析师, "
-        "数据/榜单/基准, 投资机构报告, 独立研究机构. "
-        "Judge by the actual source nature: e.g. arXiv→论文与评审, HN/Reddit→AI技术社区, "
-        "company blogs→官方一手, YouTube→社交/社区/视频, GitHub→数据/榜单/基准)\n"
-        "- importance: string (高/中/低 — your editorial judgment of how important this is to the reader)\n"
-        "- one_line_summary: string (Chinese, 50-100 characters — not just a headline, "
-        "include essential background context and the core viewpoint/finding. "
-        "Example: '谷歌发布Gemini 2.0，首次支持原生多模态输出和AI Agent调用工具，标志着从信息检索向任务执行的范式转变')\n"
-        "- key_insight: string (one English sentence, the most important takeaway)\n"
-        "- tags: array of 2-4 short tags\n"
-        "- score_reason: string (1-2 sentences explaining your editorial decision)\n\n"
+        "## 选择规则\n"
+        "1. **事件去重**：多个源报道同一件事时，只保留信息层级最高的来源，"
+        "用 event_cluster 标注同一事件\n"
+        "2. **按层级选择**：\n"
+        "   - A 类（一手信息）→ 几乎全选\n"
+        "   - B 类（深度分析）→ 选最好的几篇\n"
+        "   - C 类（二手报道）→ 同一事件只留一条\n"
+        "   - D 类（社区讨论）→ 只有真正有独特见解的才选\n"
+        "   - E 类（教程/工具/消费者内容）→ 基本不选\n"
+        "3. **优先级排序**：\n"
+        "   P1: 行业趋势的深度分析（有数据、有判断、有原创观点）\n"
+        "   P2: 创始人/投资人的一手表态或判断\n"
+        "   P3: 头部公司的重要产品/战略动作（选官方一手源）\n"
+        "   P4: 改变竞争格局的技术突破或开源项目\n\n"
 
-        f"Items:\n\n{items_text}"
+        "## 强排除规则\n"
+        "直接排除，不管看起来多'AI相关'：\n"
+        "- 入门教程、how-to指南、'如何使用X'类内容\n"
+        "- 没有原创观点的纯新闻转述（除非是首发重大消息）\n"
+        "- 消费者导向内容（AI穿搭、AI滤镜、AI手机功能）\n"
+        "- 泛泛而谈没有数据或具体判断的水文\n\n"
+
+        "## 输出格式\n"
+        "返回 JSON，key 为 \"items\"，value 为数组。每个元素：\n"
+        "- index: int（输入的 [i] 索引）\n"
+        "- include: boolean（是否入选今日日报）\n"
+        "- source_tier: string（A/B/C/D/E 信息层级）\n"
+        "- event_cluster: string（如果与其他条目讲同一件事，标注事件名，否则空字符串）\n"
+        "- topic: string（简洁的话题标签）\n"
+        "- importance: string（高/中/低）\n"
+        "- one_line_summary: string（中文，50-100字，包含背景和核心观点。"
+        "例：'谷歌发布Gemini 2.0，首次支持原生多模态输出和AI Agent调用工具，"
+        "标志着从信息检索向任务执行的范式转变'）\n"
+        "- key_insight: string（一句英文核心洞察）\n"
+        "- score_reason: string（1-2句，为什么选/不选这条）\n\n"
+
+        f"候选内容（{len(items)}条）：\n\n{items_text}"
     )
 
 
@@ -375,16 +484,31 @@ def _fallback_scored_item(item: SourceItem) -> ScoredItem:
     return ScoredItem(original=item, score=3, include=False, topic="未分类", importance="低")
 
 
+async def load_user_feedback(config: dict | None = None) -> UserFeedback:
+    """Load recent user behavior from Notion for feedback-driven curation."""
+    if not os.environ.get("NOTION_TOKEN"):
+        return UserFeedback()
+
+    from delivery.notion_writer import DATABASE_ID
+    notion = _get_notion_client()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, _fetch_recent_feedback, notion, DATABASE_ID, 7
+    )
+
+
 async def score_items(
     items: list[SourceItem],
     interests: UserInterests,
     model: str = "gpt-5.2",
     max_retries: int = 2,
+    feedback: UserFeedback | None = None,
 ) -> list[ScoredItem]:
-    """Curate source items against user interests via LLM.
+    """Curate source items via LLM with information-tier classification.
 
-    The LLM acts as an editorial curator — it decides include/exclude,
-    assigns topics and content types freely, and judges importance directly.
+    The LLM acts as a strategic curator — classifying by information tier
+    (A=一手/B=深度分析/C=二手/D=社区/E=教程), clustering duplicate events,
+    and selecting based on strategic value rather than keyword matching.
     """
     if not items:
         return []
@@ -394,7 +518,7 @@ async def score_items(
 
     for batch_start in range(0, len(items), BATCH_SIZE):
         batch = items[batch_start: batch_start + BATCH_SIZE]
-        prompt = _build_scoring_prompt(batch, interests)
+        prompt = _build_scoring_prompt(batch, interests, feedback)
 
         content = await _call_with_retry(
             client=client,
@@ -419,11 +543,14 @@ async def score_items(
                 for i, source_item in enumerate(batch):
                     entry = llm_map.get(i)
                     if entry:
-                        raw_score = max(1, min(10, int(entry.get("score", 5))))
-                        # LLM assigns all fields freely — no validation against hardcoded lists
                         importance = entry.get("importance", "中")
                         if importance not in ("高", "中", "低"):
                             importance = "中"
+
+                        # Derive score from source_tier for backwards compat
+                        tier = entry.get("source_tier", "C")
+                        tier_scores = {"A": 9, "B": 7, "C": 5, "D": 3, "E": 1}
+                        raw_score = tier_scores.get(tier, 5)
 
                         results.append(
                             ScoredItem(
@@ -431,12 +558,11 @@ async def score_items(
                                 score=raw_score,
                                 include=bool(entry.get("include", False)),
                                 topic=entry.get("topic", ""),
-                                content_type=entry.get("content_type", ""),
-                                source_category=entry.get("source_category", ""),
+                                source_tier=tier,
+                                event_cluster=entry.get("event_cluster", ""),
                                 importance=importance,
                                 one_line_summary=entry.get("one_line_summary", ""),
                                 key_insight=entry.get("key_insight", ""),
-                                tags=entry.get("tags", []),
                                 score_reason=entry.get("score_reason", ""),
                             )
                         )

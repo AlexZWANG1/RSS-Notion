@@ -1,8 +1,7 @@
-"""Hacker News data source — fetches top AI-related stories."""
+"""Hacker News data source — fetches top stories (no content filtering)."""
 
 import asyncio
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -13,26 +12,14 @@ from sources.models import SourceItem
 
 logger = logging.getLogger(__name__)
 
-# Regex pattern matching AI-related keywords (case-insensitive)
-_AI_KEYWORDS = re.compile(
-    r"\b("
-    r"ai|llm|gpt|claude|openai|anthropic|gemini"
-    r"|machine\s*learning|deep\s*learning|neural"
-    r"|transformer|diffusion|agent|rag"
-    r"|fine-tun|embedding|token|prompt"
-    r"|reasoning|multimodal"
-    r")\b",
-    re.IGNORECASE,
-)
-
 _API_BASE = "https://hacker-news.firebaseio.com/v0/"
 _TOP_STORIES_URL = f"{_API_BASE}topstories.json"
 _ITEM_URL = f"{_API_BASE}item/{{id}}.json"
-_TOP_N = 30  # number of top stories to inspect
+_TOP_N = 50  # fetch top 50, let LLM decide what's relevant
 
 
 class HackerNewsSource(BaseSource):
-    """Fetch top AI-related stories from Hacker News."""
+    """Fetch top stories from Hacker News (no keyword filtering)."""
 
     name = "Hacker News"
     icon = "🔥"
@@ -49,14 +36,12 @@ class HackerNewsSource(BaseSource):
             tasks = [self._fetch_item(session, sid) for sid in top_ids]
             raw_items: list[Optional[dict]] = await asyncio.gather(*tasks)
 
-            # 3. Filter for AI-related titles and build SourceItems
+            # 3. Build SourceItems — no keyword filtering, LLM decides
             items: list[SourceItem] = []
             for data in raw_items:
                 if data is None:
                     continue
                 title = data.get("title", "")
-                if not _AI_KEYWORDS.search(title):
-                    continue
 
                 score = data.get("score", 0)
                 descendants = data.get("descendants", 0)

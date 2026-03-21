@@ -193,15 +193,20 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 logger.info("Skipping duplicate: %s", title)
                 continue
 
-            # Use LLM-assigned source category, fallback to AI技术社区
+            # Derive source label from source_tier or source_category
             _VALID_CATEGORIES = {
                 "科技媒体", "AI技术社区", "论文与评审", "社交/社区/视频",
                 "官方一手", "个人分析师", "数据/榜单/基准", "投资机构报告",
                 "独立研究机构", "系统", "手动",
             }
+            _TIER_TO_CATEGORY = {
+                "A": "官方一手", "B": "个人分析师", "C": "科技媒体",
+                "D": "AI技术社区", "E": "AI技术社区",
+            }
             source_label = getattr(item, "source_category", "") or ""
             if source_label not in _VALID_CATEGORIES:
-                source_label = "AI技术社区"
+                tier = getattr(item, "source_tier", "")
+                source_label = _TIER_TO_CATEGORY.get(tier, "AI技术社区")
 
             properties = _build_item_properties(
                 title=title,

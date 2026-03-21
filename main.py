@@ -20,8 +20,10 @@ from sources.github_trending import GitHubTrendingSource
 from sources.folo import FoloSource
 from sources.youtube import YouTubeSource
 from sources.xiaohongshu import XiaohongshuSource
+from sources.rss_fetcher import RSSFetcher
+from sources.tavily_search import TavilySearchSource
 from sources.models import SourceResult, PipelineResult
-from generator.interest_scorer import load_user_interests, score_items, filter_items
+from generator.interest_scorer import load_user_interests, load_user_feedback, score_items, filter_items
 from generator.summarizer import process_items_batch, generate_executive_summary
 from generator.pdf_builder import build_pdf
 from delivery.emailer import send_report_email
@@ -56,6 +58,8 @@ SOURCE_CLASSES = {
     "folo": FoloSource,
     "youtube": YouTubeSource,
     "xiaohongshu": XiaohongshuSource,
+    "rss": RSSFetcher,
+    "tavily": TavilySearchSource,
 }
 
 
@@ -84,15 +88,16 @@ def _build_run_summary(all_items, selected, scored, source_results, summary, thr
 
     # Selected items with reasons
     selected_list = "\n".join(
-        f"  {i+1}. [{s.importance}|{s.score}分] {s.original.title}\n"
+        f"  {i+1}. [{s.importance}|{s.source_tier}类] {s.original.title}\n"
         f"      摘要: {s.one_line_summary}\n"
         f"      入选理由: {s.score_reason}"
+        + (f"\n      事件簇: {s.event_cluster}" if s.event_cluster else "")
         for i, s in enumerate(selected)
     )
 
     # Excluded items (brief)
     excluded_list = "\n".join(
-        f"  · [{s.score}分] {s.original.title} — {s.score_reason}"
+        f"  · [{s.source_tier}类] {s.original.title} — {s.score_reason}"
         for s in sorted(excluded, key=lambda x: x.score, reverse=True)[:20]
     )
 
@@ -237,12 +242,18 @@ async def run_pipeline(
     else:
         logger.info("  Using default interests")
 
+    # --- Phase 2b: Load user behavior feedback ---
+    logger.info("Phase 2b: Loading user feedback (recent 收藏/忽略)...")
+    feedback = await load_user_feedback(config)
+    if feedback.favorited or feedback.ignored:
+        logger.info(f"  Feedback: {len(feedback.favorited)} favorited, {len(feedback.ignored)} ignored")
+
     # --- Phase 3: Score items against user interests ---
-    logger.info("Phase 3: Scoring items against user interests...")
+    logger.info("Phase 3: Scoring items (information-tier classification)...")
     model = llm_cfg.get("processing_model", "gpt-5.2")
     summary_model = llm_cfg.get("summary_model", "gpt-5.2")
 
-    scored = await score_items(all_items, interests, model=model)
+    scored = await score_items(all_items, interests, model=model, feedback=feedback)
     logger.info(f"  Scored {len(scored)} items")
 
     # Filter: LLM editorial decision (include=True), with score threshold as fallback
