@@ -279,8 +279,9 @@ def _fetch_recent_feedback(notion, database_id: str, days: int = 7) -> UserFeedb
             # Extract title
             title_parts = props.get("名称", {}).get("title", [])
             title = "".join(t.get("plain_text", "") for t in title_parts)
-            # Strip [AI精选] prefix for cleaner matching
-            title = title.replace("[AI精选] ", "").replace("[AI研究] ", "")
+            # Strip [Source] prefix for cleaner matching
+            import re
+            title = re.sub(r"^\[[^\]]+\]\s*", "", title)
 
             if not title or title.startswith("[运行报告]"):
                 continue

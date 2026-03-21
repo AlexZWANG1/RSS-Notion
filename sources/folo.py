@@ -14,7 +14,7 @@ from sources.models import SourceItem
 logger = logging.getLogger(__name__)
 
 # Prefixes to strip from titles
-_TITLE_PREFIXES = re.compile(r"^\[(AI精选|视频摘要)\]\s*")
+_TITLE_PREFIXES = re.compile(r"^\[[^\]]+\]\s*")
 
 
 def _plain_text(rich_text_array: list) -> str:

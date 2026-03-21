@@ -28,16 +28,9 @@
       "rss": { "enabled": true, "max_items": 50, "max_age_days": 3 },
       "tavily": {
         "enabled": true,
-        "max_items": 30,
-        "max_age_days": 3,
-        "queries": [
-          "AI agent infrastructure startup",
-          "LLM inference cost breakthrough",
-          "AI startup funding round 2026",
-          "foundation model product launch",
-          "AI competitive landscape analysis"
-        ],
-        "max_per_query": 8
+        "max_items": 20,
+        "max_age_days": 7,
+        "max_per_query": 3
       },
       "xiaohongshu": {
         "enabled": true,

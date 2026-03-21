@@ -13,17 +13,16 @@ rss:
   # 独立研究
   - { name: "Semianalysis", url: "https://semianalysis.com/feed/", category: "独立研究" }
 
-  # Anthropic / Epoch AI / Menlo Ventures 没有可用的 RSS
-  # 这些通过 Tavily 搜索补漏
-
+# Tavily 搜索：只搜没有 RSS 的指定站点，补漏用
 search:
   enabled: true
   provider: tavily
-  max_age_days: 3
-  queries:
-    - "AI agent infrastructure startup funding"
-    - "LLM inference cost breakthrough 2026"
-    - "AI startup funding round series"
-    - "Anthropic OpenAI Google AI product launch"
-    - "AI competitive landscape moat analysis"
-  max_per_query: 8
+  max_age_days: 7
+  max_per_query: 3
+  site_queries:
+    - { site: "anthropic.com", name: "Anthropic" }
+    - { site: "deepseek.com", name: "DeepSeek" }
+    - { site: "epochai.org", name: "Epoch AI" }
+    - { site: "menlovc.com", name: "Menlo Ventures" }
+    - { site: "metr.org", name: "METR" }
+    - { site: "lmarena.ai", name: "Chatbot Arena" }

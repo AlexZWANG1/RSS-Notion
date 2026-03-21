@@ -185,7 +185,7 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
     written = 0
     for item in items:
         try:
-            title = f"[AI精选] {item.original.title}"
+            title = f"[{item.original.source_name}] {item.original.title}"
 
             # Duplicate check (by title + URL)
             dup = await _run_sync(_is_duplicate, notion, title, item.original.url)
