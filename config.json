@@ -58,8 +58,8 @@
       }
     },
     "llm": {
-      "summary_model": "gpt-5.4",
-      "processing_model": "gpt-5.4"
+      "summary_model": "gpt-5.4-mini",
+      "processing_model": "gpt-5.4-mini"
     },
     "pdf": {
       "template": "daily_report",
