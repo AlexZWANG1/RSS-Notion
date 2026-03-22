@@ -1,19 +1,44 @@
 rss:
-  # 官方一手
+  # ── 官方一手 ──
   - { name: "OpenAI News", url: "https://openai.com/news/rss.xml", category: "官方一手" }
   - { name: "Google DeepMind", url: "https://deepmind.google/blog/rss.xml", category: "官方一手" }
   - { name: "Google Research", url: "https://blog.research.google/feeds/posts/default?alt=rss", category: "官方一手" }
   - { name: "Microsoft Research", url: "https://www.microsoft.com/en-us/research/feed/", category: "官方一手" }
   - { name: "HuggingFace Blog", url: "https://huggingface.co/blog/feed.xml", category: "AI技术社区" }
 
-  # 投资机构
+  # ── 投资机构/研究 ──
   - { name: "a16z Future", url: "https://future.a16z.com/feed/", category: "投资机构" }
   - { name: "Sequoia Capital", url: "https://www.sequoiacap.com/feed/", category: "投资机构" }
-
-  # 独立研究
   - { name: "Semianalysis", url: "https://semianalysis.com/feed/", category: "独立研究" }
 
-# Tavily 搜索：只搜没有 RSS 的指定站点，补漏用
+  # ── 博客/独立分析（从 Folo 导入）──
+  - { name: "Gary Marcus", url: "https://garymarcus.substack.com/feed", category: "独立研究" }
+  - { name: "AI Pub", url: "https://ai.gopubby.com/feed", category: "AI技术社区" }
+  - { name: "Sebastian Raschka", url: "https://magazine.sebastianraschka.com/feed", category: "独立研究" }
+  - { name: "AI Snake Oil", url: "https://www.aisnakeoil.com/feed", category: "独立研究" }
+  - { name: "Meb Faber", url: "https://mebfaber.com/feed/", category: "投资机构" }
+  - { name: "Lex Fridman Podcast", url: "https://lexfridman.com/feed/podcast/", category: "播客" }
+
+  # ── 中文源（从 Folo 导入）──
+  - { name: "机器之心", url: "https://www.jiqizhixin.com/rss", category: "科技媒体" }
+  - { name: "36kr AI", url: "https://rsshub.app/36kr/user/5369499", category: "科技媒体" }
+
+  # ── Twitter/X 头部账号（via RSSHub 私有实例）──
+  - { name: "Sam Altman", url: "https://rsshub.shaomingbo.com/twitter/user/sama", category: "Twitter" }
+  - { name: "Paul Graham", url: "https://rsshub.shaomingbo.com/twitter/user/paulg", category: "Twitter" }
+  - { name: "Andrej Karpathy", url: "https://rsshub.shaomingbo.com/twitter/user/karpathy", category: "Twitter" }
+  - { name: "Yann LeCun", url: "https://rsshub.shaomingbo.com/twitter/user/ylecun", category: "Twitter" }
+  - { name: "Andrew Ng", url: "https://rsshub.shaomingbo.com/twitter/user/AndrewYNg", category: "Twitter" }
+  - { name: "Elon Musk", url: "https://rsshub.shaomingbo.com/twitter/user/elonmusk", category: "Twitter" }
+  - { name: "Elad Gil", url: "https://rsshub.shaomingbo.com/twitter/user/eladgil", category: "Twitter" }
+  - { name: "Kevin Weil", url: "https://rsshub.shaomingbo.com/twitter/user/kevinweil", category: "Twitter" }
+  - { name: "Geoffrey Hinton", url: "https://rsshub.shaomingbo.com/twitter/user/geoffreyhinton", category: "Twitter" }
+  - { name: "Stephen Wolfram", url: "https://rsshub.shaomingbo.com/twitter/user/stephen_wolfram", category: "Twitter" }
+  - { name: "宝玉xp", url: "https://rsshub.shaomingbo.com/twitter/user/dotey", category: "Twitter" }
+  - { name: "歸藏", url: "https://rsshub.shaomingbo.com/twitter/user/op7418", category: "Twitter" }
+  - { name: "小互", url: "https://rsshub.shaomingbo.com/twitter/user/frxiaobei", category: "Twitter" }
+
+# ── Tavily 搜索：定向补漏（没有 RSS 的站点）──
 search:
   enabled: true
   provider: tavily
@@ -26,4 +51,3 @@ search:
     - { site: "menlovc.com", name: "Menlo Ventures" }
     - { site: "metr.org", name: "METR" }
     - { site: "lmarena.ai", name: "Chatbot Arena" }
-    - { site: "x.com", name: "X/Twitter" }
