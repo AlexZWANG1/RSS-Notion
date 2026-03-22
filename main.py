@@ -424,11 +424,21 @@ def main():
         "--cleanup-only", action="store_true",
         help="Only run inbox cleanup (archive starred, delete expired), skip pipeline",
     )
+    parser.add_argument(
+        "--deep-read-only", action="store_true",
+        help="Only run Deep Reader (process 待深度阅读 YouTube pages), skip pipeline",
+    )
     args = parser.parse_args()
 
     if args.cleanup_only:
         stats = asyncio.run(cleanup_inbox(retention_days=3))
         print(f"Cleanup done: {stats['archived']} archived, {stats['deleted']} deleted, {stats['skipped']} skipped")
+        sys.exit(0)
+
+    if args.deep_read_only:
+        from generator.deep_reader import process_deep_read_pages
+        count = asyncio.run(process_deep_read_pages(load_config()))
+        print(f"Deep Reader done: {count} pages processed")
         sys.exit(0)
 
     only_sources = args.sources.split(",") if args.sources else None

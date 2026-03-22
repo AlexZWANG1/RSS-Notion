@@ -151,6 +151,58 @@ async def get_job_status(job_id: str):
     return job
 
 # ---------------------------------------------------------------------------
+# Webhook: Deep Reader trigger
+# ---------------------------------------------------------------------------
+
+@app.post("/api/webhook/deep-read")
+async def webhook_deep_read(payload: dict | None = None):
+    """Webhook endpoint for Notion — triggers Deep Reader.
+
+    Call this when a page's 待深度阅读 checkbox is toggled.
+    Notion automation → HTTP request → this endpoint → fetch transcript → write summary.
+    """
+    job_id = f"dr-{uuid.uuid4().hex[:8]}"
+    job = JobStatus(
+        job_id=job_id,
+        status="pending",
+        started_at=datetime.now().isoformat(),
+    )
+    _jobs[job_id] = job
+
+    asyncio.create_task(_run_deep_reader(job_id))
+    return {"job_id": job_id, "status": "processing", "message": "Deep Reader triggered"}
+
+
+@app.post("/api/webhook/notion")
+async def webhook_notion(payload: dict | None = None):
+    """Generic Notion webhook — auto-detects action and routes accordingly."""
+    # For now, always trigger deep reader
+    return await webhook_deep_read(payload)
+
+
+async def _run_deep_reader(job_id: str) -> None:
+    """Execute Deep Reader in the background."""
+    job = _jobs[job_id]
+    job.status = "running"
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        from main import load_config
+        from generator.deep_reader import process_deep_read_pages
+
+        config = load_config()
+        count = await process_deep_read_pages(config)
+        job.status = "completed"
+        logger.info(f"Deep Reader webhook done: {count} pages processed")
+    except Exception as e:
+        logger.exception("Deep Reader webhook failed")
+        job.status = "failed"
+        job.error = str(e)
+    finally:
+        job.finished_at = datetime.now().isoformat()
+
+
+# ---------------------------------------------------------------------------
 # Background pipeline runner
 # ---------------------------------------------------------------------------
 
