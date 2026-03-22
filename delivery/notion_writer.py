@@ -280,6 +280,107 @@ async def write_research_report_to_notion(
         return False
 
 
+async def write_digest_to_notion(
+    selected: list, summary: str, total_items: int, today: str
+) -> bool:
+    """Write a structured daily digest report to Notion."""
+    notion = _get_notion_client()
+    if notion is None:
+        return False
+
+    page_title = f"[AI日报] {today} AI 产业日报"
+    properties = _build_item_properties(
+        title=page_title,
+        source="系统",
+        topic="AI 日报",
+        importance="高",
+        today=today,
+    )
+
+    # Build structured blocks
+    blocks: list[dict[str, Any]] = []
+
+    # Header callout
+    blocks.append({
+        "type": "callout",
+        "callout": {
+            "rich_text": [{"text": {"content":
+                f"今日扫描 {total_items} 条内容，精选 {len(selected)} 条"
+            }}],
+            "icon": {"type": "emoji", "emoji": "\U0001f4ca"},
+        },
+    })
+
+    # Executive summary
+    blocks.append({
+        "type": "heading_2",
+        "heading_2": {"rich_text": [{"text": {"content": "趋势摘要"}}]},
+    })
+    # Split summary into paragraphs
+    for para in summary.split("\n"):
+        para = para.strip()
+        if para:
+            blocks.append(_text_block(para))
+
+    blocks.append({"type": "divider", "divider": {}})
+
+    # Selected items grouped by importance
+    blocks.append({
+        "type": "heading_2",
+        "heading_2": {"rich_text": [{"text": {"content": "精选内容"}}]},
+    })
+
+    high = [s for s in selected if s.importance == "高"]
+    medium = [s for s in selected if s.importance == "中"]
+    low = [s for s in selected if s.importance == "低"]
+
+    for group, label in [(high, "高重要性"), (medium, "中重要性"), (low, "其他")]:
+        if not group:
+            continue
+        blocks.append({
+            "type": "heading_3",
+            "heading_3": {"rich_text": [{"text": {"content": f"{label}（{len(group)} 条）"}}]},
+        })
+        for s in group:
+            # Title as linked text
+            title_rt: dict[str, Any] = {"content": f"[{s.original.source_name}] {s.original.title}"}
+            if s.original.url:
+                title_rt["link"] = {"url": s.original.url}
+            blocks.append({
+                "type": "bulleted_list_item",
+                "bulleted_list_item": {
+                    "rich_text": [
+                        {"text": title_rt, "annotations": {"bold": True}},
+                    ],
+                },
+            })
+            if s.one_line_summary:
+                blocks.append(_text_block(f"   {s.one_line_summary}"))
+
+            # Stop at 95 blocks to stay under Notion's 100 limit
+            if len(blocks) >= 93:
+                blocks.append(_text_block("... 更多内容请查看收件箱"))
+                break
+        if len(blocks) >= 93:
+            break
+
+    # Cap at 100 blocks
+    blocks = blocks[:98]
+
+    try:
+        await _run_sync(
+            notion.pages.create,
+            parent={"database_id": DATABASE_ID},
+            properties=properties,
+            children=blocks,
+        )
+        logger.info("Digest written to Notion: %s", page_title)
+        return True
+    except Exception as exc:
+        logger.error("Failed to write digest: %s", exc)
+        return False
+
+
 async def write_run_report_to_notion(summary: str, today: str) -> bool:
     """Write a pipeline run summary to the Notion inbox.
 

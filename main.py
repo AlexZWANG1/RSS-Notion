@@ -29,7 +29,7 @@ from generator.pdf_builder import build_pdf
 from delivery.emailer import send_report_email
 from delivery.notion_writer import (
     write_scored_items_to_notion,
-    write_research_report_to_notion,
+    write_digest_to_notion,
     write_run_report_to_notion,
     cleanup_inbox,
 )
@@ -88,7 +88,7 @@ def _build_run_summary(all_items, selected, scored, source_results, summary, thr
 
     # Selected items with reasons
     selected_list = "\n".join(
-        f"  {i+1}. [{s.importance}|{s.source_tier}类] {s.original.title}\n"
+        f"  {i+1}. [{s.importance}] {s.original.title}\n"
         f"      摘要: {s.one_line_summary}\n"
         f"      入选理由: {s.score_reason}"
         + (f"\n      事件簇: {s.event_cluster}" if s.event_cluster else "")
@@ -97,7 +97,7 @@ def _build_run_summary(all_items, selected, scored, source_results, summary, thr
 
     # Excluded items (brief)
     excluded_list = "\n".join(
-        f"  · [{s.source_tier}类] {s.original.title} — {s.score_reason}"
+        f"  · {s.original.title} — {s.score_reason}"
         for s in sorted(excluded, key=lambda x: x.score, reverse=True)[:20]
     )
 
@@ -288,24 +288,11 @@ async def run_pipeline(
         written = await write_scored_items_to_notion(selected, today)
         logger.info(f"  Wrote {written} items to Notion inbox")
 
-        # Write executive summary as a digest report
-        digest_content = (
-            f"📈 AI 产业日报 — {today}\n\n"
-            f"今日扫描 {len(all_items)} 条内容，精选 {len(selected)} 条。\n\n"
-            f"{'='*40}\n\n"
-            f"{summary}\n\n"
-            f"{'='*40}\n\n"
-            "📋 精选列表\n" +
-            "\n".join(
-                f"{i+1}. [{s.source_tier}类|{s.importance}] {s.original.title}\n"
-                f"   {s.one_line_summary}"
-                for i, s in enumerate(selected)
-            )
-        )
-        await write_research_report_to_notion(
-            title=f"AI 产业日报",
-            content=digest_content,
-            topic="AI 日报",
+        # Write executive summary as a structured digest report
+        await write_digest_to_notion(
+            selected=selected,
+            summary=summary,
+            total_items=len(all_items),
             today=today,
         )
 
