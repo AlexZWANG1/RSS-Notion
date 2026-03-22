@@ -19,8 +19,8 @@
   },
   "pipeline": {
     "sources": {
-      "folo": { "enabled": true },
-      "hackernews": { "enabled": true, "max_items": 30 },
+      "folo": { "enabled": true, "max_items": 80 },
+      "hackernews": { "enabled": true, "max_items": 20 },
       "arxiv": { "enabled": true, "categories": ["cs.AI", "cs.CL", "cs.LG"], "max_items": 20 },
       "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
       "producthunt": { "enabled": false, "max_items": 10 },
