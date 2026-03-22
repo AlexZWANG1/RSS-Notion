@@ -368,16 +368,26 @@ async def run_pipeline(
     else:
         logger.info("Phase 6: Email skipped (--skip-email)")
 
-    # --- Phase 7: Inbox Cleanup ---
+    # --- Phase 7: Deep Reader (YouTube transcript summaries) ---
     if not skip_notion:
-        logger.info("Phase 7: Cleaning up inbox...")
+        logger.info("Phase 7: Deep Reader — processing 待深度阅读 pages...")
+        from generator.deep_reader import process_deep_read_pages
+        deep_count = await process_deep_read_pages(config)
+        if deep_count:
+            logger.info(f"  Deep Reader: {deep_count} pages processed")
+        else:
+            logger.info("  Deep Reader: no pages to process")
+
+    # --- Phase 8: Inbox Cleanup ---
+    if not skip_notion:
+        logger.info("Phase 8: Cleaning up inbox...")
         cleanup_stats = await cleanup_inbox(retention_days=3)
         logger.info(
             f"  Cleanup: {cleanup_stats['archived']} archived, "
             f"{cleanup_stats['deleted']} deleted, {cleanup_stats['skipped']} skipped"
         )
     else:
-        logger.info("Phase 7: Inbox cleanup skipped (--skip-notion)")
+        logger.info("Phase 8: Inbox cleanup skipped (--skip-notion)")
 
     # --- Done ---
     logger.info("=" * 50)

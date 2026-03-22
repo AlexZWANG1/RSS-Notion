@@ -1,6 +1,7 @@
 aiohttp>=3.9
 feedparser>=6.0
 pyyaml>=6.0
+youtube-transcript-api>=0.6
 fastapi>=0.115
 uvicorn[standard]>=0.34
 arxiv>=2.1
