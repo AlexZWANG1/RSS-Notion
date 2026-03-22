@@ -43,7 +43,7 @@
         "max_items": 15,
         "max_age_days": 7,
         "channels": [
-          { "channel_id": "UCMLtBahI5DMrt0NPvDSoIRQ", "handle": "NoPriorsPod", "name": "No Priors" },
+          { "channel_id": "UCMLtBahI5DMrt0NPvDSoIRQ", "handle": "NoPriorsPodcast", "name": "No Priors" },
           { "channel_id": "UCSHZKyawb77ixDdsGog4iWA", "handle": "lexfridman", "name": "Lex Fridman" },
           { "channel_id": "UCbfYPyITQ-7l4upoX8nvctg", "handle": "TwoMinutePapers", "name": "Two Minute Papers" },
           { "channel_id": "UCsBjURrPoezykLs9EqgamOA", "handle": "Fireship", "name": "Fireship" },
