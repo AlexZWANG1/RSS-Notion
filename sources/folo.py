@@ -86,7 +86,8 @@ class FoloSource(BaseSource):
         seen_urls: set[str] = set()
 
         try:
-            resp = await client.post(f"{_API_BASE}/entries", json={})
+            # Fetch more entries (default is 20, request up to 100)
+            resp = await client.post(f"{_API_BASE}/entries", json={"limit": 100})
             resp.raise_for_status()
             data = resp.json()
 

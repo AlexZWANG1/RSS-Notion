@@ -33,7 +33,7 @@
         "max_per_query": 3
       },
       "xiaohongshu": {
-        "enabled": true,
+        "enabled": false,
         "max_items": 10,
         "mcp_url": "http://localhost:18060/mcp",
         "keywords": ["AI", "大模型", "人工智能", "LLM", "Agent"]
