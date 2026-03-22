@@ -30,14 +30,12 @@ class _SourceItemLike(Protocol):
 
 class _ScoredItemLike(Protocol):
     original: _SourceItemLike
-    score: int
-    topic: str
-    content_type: str
-    source_category: str
+    include: bool
+    channel: str
     importance: str
-    one_line_summary: str
-    key_insight: str
-    tags: list[str]
+    what_happened: str
+    why_it_matters: str
+    score_reason: str
 
 
 # ---------------------------------------------------------------------------
@@ -64,21 +62,18 @@ def _text_block(text: str) -> dict[str, Any]:
     }
 
 
-def _content_blocks_for_item(item: _ScoredItemLike) -> list[dict[str, Any]]:
+def _content_blocks_for_item(item) -> list[dict[str, Any]]:
     """Build children blocks that describe a scored item."""
     blocks: list[dict[str, Any]] = []
-    if item.one_line_summary:
-        blocks.append(_text_block(f"📌 {item.one_line_summary}"))
-    if item.key_insight:
-        blocks.append(_text_block(f"💡 {item.key_insight}"))
-    score_reason = getattr(item, "score_reason", "")
-    if score_reason:
-        blocks.append(_text_block(f"✅ 入选理由: {score_reason}"))
-    content_type = getattr(item, "content_type", "")
-    if content_type:
-        blocks.append(_text_block(f"📂 类型: {content_type}"))
-    if item.tags:
-        blocks.append(_text_block(f"🏷️ Tags: {', '.join(item.tags)}"))
+    wh = getattr(item, "what_happened", "") or getattr(item, "one_line_summary", "")
+    wm = getattr(item, "why_it_matters", "") or getattr(item, "key_insight", "")
+    if wh:
+        blocks.append(_text_block(f"📌 {wh}"))
+    if wm:
+        blocks.append(_text_block(f"💡 {wm}"))
+    reason = getattr(item, "score_reason", "")
+    if reason:
+        blocks.append(_text_block(f"✅ 入选理由: {reason}"))
     return blocks
 
 
@@ -98,7 +93,6 @@ def _content_blocks_for_text(content: str, max_blocks: int = 95) -> list[dict[st
 def _build_item_properties(
     title: str,
     source: str,
-    topic: str | None,
     importance: str,
     today: str,
     url: str | None = None,
@@ -120,8 +114,6 @@ def _build_item_properties(
     }
     if selection_reason:
         props["入选理由"] = {"rich_text": [{"text": {"content": selection_reason[:2000]}}]}
-    if topic:
-        props["话题"] = {"multi_select": [{"name": topic}]}
     if url:
         props["原文链接"] = {"url": url}
     if media_source:
@@ -193,27 +185,21 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 logger.info("Skipping duplicate: %s", title)
                 continue
 
-            # Use LLM-assigned source_category
-            _VALID_CATEGORIES = {
-                "官方一手", "深度研究", "科技媒体",
-                "社交/视频", "开源/技术", "投资/商业",
-                "系统",
-            }
-            source_label = getattr(item, "source_category", "") or ""
-            if source_label not in _VALID_CATEGORIES:
-                source_label = "开源/技术"
+            _VALID_CHANNELS = {"一手/深度研究", "长内容", "社交/社区", "开源/论文", "系统"}
+            ch = getattr(item, "channel", "") or ""
+            if ch not in _VALID_CHANNELS:
+                ch = "开源/论文"
 
             properties = _build_item_properties(
                 title=title,
-                source=source_label,
-                topic=item.topic,
+                source=ch,
                 importance=item.importance,
                 today=today,
                 url=item.original.url,
                 media_source=item.original.source_name,
-                summary=item.one_line_summary,
-                insight=item.key_insight,
-                selection_reason=getattr(item, "score_reason", ""),
+                summary=getattr(item, "what_happened", "") or getattr(item, "one_line_summary", ""),
+                insight=getattr(item, "why_it_matters", "") or getattr(item, "key_insight", ""),
+                selection_reason=item.score_reason,
             )
             children = _content_blocks_for_item(item)
 
@@ -234,14 +220,13 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
 
 
 async def write_research_report_to_notion(
-    title: str, content: str, topic: str, today: str
+    title: str, content: str, today: str
 ) -> bool:
     """Create a research report page in the Notion inbox.
 
     Args:
         title: Report title (without prefix/date).
         content: Full report body text.
-        topic: One of the valid 话题 options.
         today: Date string in ``YYYY-MM-DD`` format.
 
     Returns:
@@ -254,8 +239,7 @@ async def write_research_report_to_notion(
     page_title = f"[AI研究] {title} ({today})"
     properties = _build_item_properties(
         title=page_title,
-        source="AI生成",
-        topic=topic,
+        source="一手/深度研究",
         importance="高",
         today=today,
     )
@@ -287,7 +271,6 @@ async def write_digest_to_notion(
     properties = _build_item_properties(
         title=page_title,
         source="系统",
-        topic="AI 日报",
         importance="高",
         today=today,
     )
@@ -326,44 +309,58 @@ async def write_digest_to_notion(
         },
     })
 
-    # Split selected into strategy vs tech based on source_category
-    _STRATEGY_CATS = {"官方一手", "科技媒体", "投资/商业", "深度研究"}
-    strategy = [s for s in selected if getattr(s, "source_category", "") in _STRATEGY_CATS
-                or s.importance == "高"]
-    tech = [s for s in selected if s not in strategy]
+    # Group by channel
+    from collections import defaultdict
+    by_channel = defaultdict(list)
+    must_read = []
+    for s in selected:
+        if s.importance == "高":
+            must_read.append(s)
+        ch = getattr(s, "channel", "") or "开源/论文"
+        by_channel[ch].append(s)
 
-    # Part 1: 🔵 战略与商业
-    if strategy:
-        blocks.append(_heading2("\U0001f535 \u6218\u7565\u4e0e\u5546\u4e1a"))
-        for s in strategy:
-            blocks.append(_linked_bullet(
-                s.original.title, s.original.url, s.original.source_name
-            ))
-            if s.one_line_summary:
-                blocks.append(_text_block(f"    {s.one_line_summary}"))
-            if len(blocks) >= 90:
+    # Must read section (importance=高)
+    if must_read:
+        blocks.append(_heading2("📌 今日必读"))
+        for s in must_read[:5]:
+            blocks.append(_linked_bullet(s.original.title, s.original.url, s.original.source_name))
+            wh = getattr(s, "what_happened", "")
+            wm = getattr(s, "why_it_matters", "")
+            if wh:
+                blocks.append(_text_block(f"    {wh}"))
+            if wm:
+                blocks.append(_text_block(f"    💡 {wm}"))
+            if len(blocks) >= 85:
                 break
 
-    if strategy and tech:
+    if must_read:
         blocks.append(_divider())
 
-    # Part 2: 🟢 技术动态
-    if tech:
-        blocks.append(_heading2("\U0001f7e2 \u6280\u672f\u52a8\u6001"))
-        for s in tech:
-            blocks.append(_linked_bullet(
-                s.original.title, s.original.url, s.original.source_name
-            ))
-            if s.one_line_summary:
-                blocks.append(_text_block(f"    {s.one_line_summary}"))
-            if len(blocks) >= 95:
+    # Channel sections
+    _CHANNEL_ICONS = {
+        "一手/深度研究": "📰", "长内容": "🎬",
+        "社交/社区": "💬", "开源/论文": "🔧",
+    }
+    for ch_name in ["一手/深度研究", "长内容", "社交/社区", "开源/论文"]:
+        items_in_ch = by_channel.get(ch_name, [])
+        if not items_in_ch:
+            continue
+        icon = _CHANNEL_ICONS.get(ch_name, "📄")
+        blocks.append(_heading2(f"{icon} {ch_name} ({len(items_in_ch)}条)"))
+        for s in items_in_ch:
+            blocks.append(_linked_bullet(s.original.title, s.original.url, s.original.source_name))
+            wh = getattr(s, "what_happened", "")
+            if wh:
+                blocks.append(_text_block(f"    {wh}"))
+            if len(blocks) >= 90:
                 break
+        if len(blocks) >= 90:
+            break
 
     # Part 3: Executive summary as trend observation
     if summary:
         blocks.append(_divider())
         blocks.append(_heading2("\U0001f4c8 \u8d8b\u52bf\u89c2\u5bdf"))
-        # Only take first 3 paragraphs to stay under block limit
         paras = [p.strip() for p in summary.split("\n") if p.strip()]
         for para in paras[:5]:
             if len(blocks) >= 98:
@@ -404,7 +401,6 @@ async def write_run_report_to_notion(summary: str, today: str) -> bool:
     properties = _build_item_properties(
         title=page_title,
         source="系统",
-        topic=None,
         importance="低",
         today=today,
     )

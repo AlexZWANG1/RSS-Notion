@@ -89,7 +89,7 @@ def _build_run_summary(all_items, selected, scored, source_results, summary, thr
     # Selected items with reasons
     selected_list = "\n".join(
         f"  {i+1}. [{s.importance}] {s.original.title}\n"
-        f"      摘要: {s.one_line_summary}\n"
+        f"      摘要: {getattr(s, 'what_happened', '')}\n"
         f"      入选理由: {s.score_reason}"
         + (f"\n      事件簇: {s.event_cluster}" if s.event_cluster else "")
         for i, s in enumerate(selected)
@@ -98,20 +98,21 @@ def _build_run_summary(all_items, selected, scored, source_results, summary, thr
     # Excluded items (brief)
     excluded_list = "\n".join(
         f"  · {s.original.title} — {s.score_reason}"
-        for s in sorted(excluded, key=lambda x: x.score, reverse=True)[:20]
+        for s in excluded[:20]
     )
 
-    topic_counts: dict[str, int] = {}
+    channel_counts: dict[str, int] = {}
     for s in selected:
-        topic_counts[s.topic] = topic_counts.get(s.topic, 0) + 1
-    topic_dist = ", ".join(f"{t}({c})" for t, c in sorted(topic_counts.items(), key=lambda x: -x[1]))
+        ch = getattr(s, "channel", "") or "未分类"
+        channel_counts[ch] = channel_counts.get(ch, 0) + 1
+    channel_dist = ", ".join(f"{t}({c})" for t, c in sorted(channel_counts.items(), key=lambda x: -x[1]))
 
     return (
         f"📊 处理统计\n"
         f"抓取 {len(all_items)} 条 → AI编辑筛选 {len(scored)} 条 → 入选 {len(selected)} 条 (淘汰 {len(excluded)} 条)\n\n"
         f"📡 数据源\n{source_stats}\n\n"
         f"📥 全部接收内容 ({len(all_items)}条)\n{received_text}\n\n"
-        f"🏷️ 话题分布: {topic_dist}\n\n"
+        f"🏷️ 频道分布: {channel_dist}\n\n"
         f"✅ 入选内容 ({len(selected)}条)\n{selected_list}\n\n"
         f"❌ 未入选内容 (展示前20条)\n{excluded_list}\n\n"
         f"💡 核心发现\n{summary}"
@@ -141,10 +142,11 @@ def _build_email_body(all_items, selected, scored, source_results, summary, toda
         lines.append("⭐ 重点阅读（高重要性）")
         lines.append("-" * 30)
         for s in high:
-            lines.append(f"  [{s.topic}] {s.original.title}")
-            lines.append(f"  → {s.one_line_summary}")
-            if s.key_insight:
-                lines.append(f"  💡 {s.key_insight}")
+            lines.append(f"  [{getattr(s, 'channel', '')}] {s.original.title}")
+            lines.append(f"  → {getattr(s, 'what_happened', '')}")
+            wm = getattr(s, "why_it_matters", "")
+            if wm:
+                lines.append(f"  💡 {wm}")
             lines.append(f"  🔗 {s.original.url}")
             lines.append("")
 
@@ -152,8 +154,8 @@ def _build_email_body(all_items, selected, scored, source_results, summary, toda
         lines.append("📌 值得一看")
         lines.append("-" * 30)
         for s in medium:
-            lines.append(f"  [{s.topic}] {s.original.title}")
-            lines.append(f"  → {s.one_line_summary}")
+            lines.append(f"  [{getattr(s, 'channel', '')}] {s.original.title}")
+            lines.append(f"  → {getattr(s, 'what_happened', '')}")
             lines.append(f"  🔗 {s.original.url}")
             lines.append("")
 
@@ -254,11 +256,14 @@ async def run_pipeline(
     summary_model = llm_cfg.get("summary_model", "gpt-5.2")
 
     scored = await score_items(all_items, interests, model=model, feedback=feedback)
-    logger.info(f"  Scored {len(scored)} items")
+    selected = filter_items(scored, max_items=max_selected)
 
-    # Filter: LLM editorial decision (include=True), with score threshold as fallback
-    selected = filter_items(scored, threshold=threshold, max_items=max_selected)
+    # importance from position (LLM already sorted by importance)
+    for i, item in enumerate(selected):
+        item.importance = "高" if i < 5 else "中"
+
     included_count = sum(1 for s in scored if s.include)
+    logger.info(f"  Scored {len(scored)} items")
     logger.info(f"  LLM included {included_count} items, final selected {len(selected)}")
 
     # Build processed items from scored items (no extra LLM call)
@@ -266,10 +271,10 @@ async def run_pipeline(
     processed = [
         ProcessedItem(
             original=s.original,
-            one_line_summary=s.one_line_summary,
-            category=s.topic,
-            relevance="high" if s.importance == "高" else ("medium" if s.importance == "中" else "low"),
-            key_insight=s.key_insight,
+            one_line_summary=getattr(s, "what_happened", ""),
+            category=getattr(s, "channel", ""),
+            relevance="high" if s.importance == "高" else "medium",
+            key_insight=getattr(s, "why_it_matters", ""),
         )
         for s in scored
     ]
@@ -277,7 +282,7 @@ async def run_pipeline(
 
     # Executive summary
     logger.info("Generating executive summary...")
-    summary = await generate_executive_summary(processed, model=summary_model)
+    summary = await generate_executive_summary(selected, model=summary_model)
     result.executive_summary = summary
 
     # --- Phase 4: Write to Notion ---
@@ -345,10 +350,9 @@ async def run_pipeline(
                 "relevance": pi.relevance,
                 "tags": pi.tags,
                 "score": pi.original.score,
-                "interest_score": score_map[pi.original.url].score if pi.original.url in score_map else None,
-                "topic": score_map[pi.original.url].topic if pi.original.url in score_map else None,
-                "content_type": score_map[pi.original.url].content_type if pi.original.url in score_map else None,
-                "source_category": score_map[pi.original.url].source_category if pi.original.url in score_map else None,
+                "channel": score_map[pi.original.url].channel if pi.original.url in score_map else None,
+                "what_happened": getattr(score_map.get(pi.original.url), "what_happened", None),
+                "why_it_matters": getattr(score_map.get(pi.original.url), "why_it_matters", None),
             }
             for pi in processed
         ],
