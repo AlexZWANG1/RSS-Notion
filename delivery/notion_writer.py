@@ -193,20 +193,45 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 logger.info("Skipping duplicate: %s", title)
                 continue
 
-            # Derive source label from source_tier or source_category
+            # Derive source category from source_name
             _VALID_CATEGORIES = {
                 "科技媒体", "AI技术社区", "论文与评审", "社交/社区/视频",
                 "官方一手", "个人分析师", "数据/榜单/基准", "投资机构报告",
-                "独立研究机构", "系统", "手动",
+                "独立研究机构", "系统", "手动", "Twitter",
             }
-            _TIER_TO_CATEGORY = {
-                "A": "官方一手", "B": "个人分析师", "C": "科技媒体",
-                "D": "AI技术社区", "E": "AI技术社区",
+            _SOURCE_NAME_MAP = {
+                "Hacker News": "AI技术社区",
+                "arXiv": "论文与评审",
+                "GitHub Trending": "数据/榜单/基准",
+                "OpenAI News": "官方一手",
+                "Google DeepMind": "官方一手",
+                "Google Research": "官方一手",
+                "Microsoft Research": "官方一手",
+                "HuggingFace Blog": "AI技术社区",
+                "Semianalysis": "独立研究机构",
+                "36kr": "科技媒体",
             }
+            src_name = item.original.source_name
             source_label = getattr(item, "source_category", "") or ""
             if source_label not in _VALID_CATEGORIES:
-                tier = getattr(item, "source_tier", "")
-                source_label = _TIER_TO_CATEGORY.get(tier, "AI技术社区")
+                source_label = _SOURCE_NAME_MAP.get(src_name, "")
+            if not source_label:
+                # Infer from source name patterns
+                if any(k in src_name for k in ("Twitter", "@", "Elon", "Sam Altman", "Paul Graham",
+                       "Yann LeCun", "Karpathy", "Andrew Ng", "Hinton", "Wolfram")):
+                    source_label = "Twitter"
+                elif any(k in src_name for k in ("Podcast", "All-In", "No Priors", "Dwarkesh", "Fireship")):
+                    source_label = "社交/社区/视频"
+                elif "r/" in src_name:
+                    source_label = "AI技术社区"
+                elif any(k in src_name for k in ("a16z", "Sequoia", "Menlo", "Meb Faber")):
+                    source_label = "投资机构报告"
+                elif any(k in src_name for k in ("Marcus", "Snake Oil", "Raschka", "Epoch")):
+                    source_label = "独立研究机构"
+                elif src_name in ("Folo", "Tavily搜索"):
+                    source_label = "科技媒体"
+                else:
+                    source_label = "AI技术社区"
 
             properties = _build_item_properties(
                 title=title,
