@@ -1,9 +1,9 @@
-# AI Daily Digest — Strategic Intelligence Pipeline
+# AI Daily Digest — 每日 AI 认知日报自动化 Agent
 
-> A fully automated AI news curation agent that fetches from 10+ sources, generates **information increments** (what_happened / why_it_matters) for each pick, clusters duplicate events, and delivers a personalized daily brief tuned by your real reading behavior.
+> 全自动化的 AI 信息策展系统：从 9 个数据源并发抓取 100+ 条内容，经过**信息增量判断**模型筛选（不打分，只问"读完后认知会变化吗"），生成结构化日报，同步到 Notion 知识库，并支持 YouTube 视频字幕深度摘要。
 
 ```
-80-150 items/day → Dedup → Single LLM Curation Call → 10-15 picks → Notion + PDF + Email
+100+ 条/天 → Python 去重 → 单次 LLM 筛选 → 10-15 条精选 → Notion + PDF + 邮件
 ```
 
 ![Python](https://img.shields.io/badge/Python-3.12+-blue?logo=python)
@@ -12,318 +12,269 @@
 
 ---
 
-## Architecture
+## 系统架构
 
 ```mermaid
 graph TB
-    subgraph "Primary: Folo (55 subscriptions)"
-        Folo[("Folo RSS Reader<br/>Twitter / 博客 / 播客")]
+    subgraph "主力源：Folo（55 个订阅）"
+        Folo[("Folo RSS 阅读器<br/>Twitter / 博客 / 播客")]
     end
 
-    subgraph "Backup: RSS (8 feeds)"
+    subgraph "补充 RSS（8 个源）"
         RSS[("sources.yaml")]
         RSS --> OpenAI[OpenAI Blog]
         RSS --> DeepMind[DeepMind]
-        RSS --> GResearch[Google Research]
-        RSS --> MSFT[Microsoft Research]
-        RSS --> HF[HuggingFace]
         RSS --> a16z[a16z]
-        RSS --> Sequoia[Sequoia]
         RSS --> Semi[Semianalysis]
     end
 
-    subgraph "YouTube (Jina Reader fallback)"
-        YT[YouTube Channels<br/>No Priors / Lex / Karpathy / ...]
+    subgraph "YouTube（Jina Reader 降级）"
+        YT[8 个频道<br/>No Priors / Karpathy / Lex / ...]
     end
 
-    subgraph "Supplements"
+    subgraph "补充源"
         HN[Hacker News<br/>top 15]
-        Reddit[Reddit<br/>LocalLLaMA / ML]
+        Reddit[Reddit]
         GH[GitHub Trending]
-        ArXiv[arXiv<br/>cs.AI / cs.CL / cs.LG]
-        XHS[小红书 via MCP]
+        ArXiv[arXiv]
+        XHS[小红书 MCP]
     end
 
-    Folo & RSS & YT & HN & Reddit & GH & ArXiv & XHS --> Merge["Merge & Dedup<br/>(URL + title, no LLM)"]
+    Folo & RSS & YT & HN & Reddit & GH & ArXiv & XHS --> Merge["合并 & 去重<br/>（URL + 标题，纯规则）"]
 
-    Merge --> |"60-90 items"| Feedback["Load Feedback<br/>Recent 7d ⭐收藏 / ❌忽略"]
+    Merge --> |"60-90 条"| Feedback["加载反馈<br/>最近 7 天 ⭐收藏 / ❌忽略"]
 
-    Feedback --> LLM["Single LLM Call<br/>(gpt-5.4-mini)<br/>classify + select + summarize"]
+    Feedback --> LLM["单次 LLM 调用<br/>(gpt-5.4-mini)<br/>筛选 + 分类 + 摘要"]
 
-    LLM --> |"10-15 picks"| Output
+    LLM --> |"10-15 条"| Output
 
-    subgraph Output["Delivery"]
-        Notion[(Notion Inbox)]
-        PDF[PDF Report]
-        Email[Email Digest]
+    subgraph Output["输出"]
+        Notion[(Notion 收件箱)]
+        PDF[PDF 日报]
+        Email[邮件推送]
     end
 
-    Notion --> |"user marks ⭐/❌"| Feedback
-
-    Notion -.-> |"待深度阅读 ✓"| DeepReader["Deep Reader<br/>YouTube transcript → AI summary"]
+    Notion --> |"用户标记 ⭐/❌"| Feedback
+    Notion -.-> |"待深度阅读 ✓"| DeepReader["Deep Reader<br/>YouTube 字幕 → AI 摘要"]
 
     style LLM fill:#f9f,stroke:#333,stroke-width:2px
     style Feedback fill:#ffd,stroke:#333,stroke-width:1px
     style DeepReader fill:#e6f3ff,stroke:#333,stroke-width:1px
 ```
 
-### Channel System (信息频道)
+### 信息频道分类
 
-The LLM classifies each item into a **channel** based on source type, then selects based on information increment value:
+| 频道 | 颜色 | 来源 | 选择规则 |
+|------|------|------|---------|
+| **一手/官方** | 🔵 蓝 | CEO 博客、官方公告、新闻稿 | 几乎全选 |
+| **深度研究** | 🟣 紫 | a16z 报告、Semianalysis、长文分析 | 选最好的几篇 |
+| **长内容/播客** | 🟠 橙 | YouTube 视频、播客、长文博客 | 每话题选最佳 |
+| **社交/社区/Twitter** | 🟢 绿 | Twitter 推文、Reddit、HN | 有独特见解才选 |
+| **开源/技术/论文** | ⚪ 灰 | GitHub 仓库、arXiv 论文 | 重要发布才选 |
 
-| Channel | Color | Sources | Selection Rule |
-|---------|-------|---------|---------------|
-| **一手/官方** | 🔵 blue | CEO blog posts, official launches, press releases | Almost always select |
-| **深度研究** | 🟣 purple | a16z reports, Semianalysis, long-form analysis | Select the best few |
-| **长内容/播客** | 🟠 orange | YouTube videos, podcasts, long blog posts | Best per topic |
-| **社交/社区/Twitter** | 🟢 green | Twitter threads, Reddit, Hacker News | Only if uniquely insightful |
-| **开源/技术/论文** | ⚪ gray | GitHub repos, arXiv papers | Notable releases only |
-
-**Event clustering**: When multiple sources cover the same story, only the highest-value source is kept.
-
-### Feedback Loop
+### 反馈闭环
 
 ```mermaid
 graph LR
-    A["Daily Digest<br/>→ Notion Inbox"] --> B["You read & mark<br/>⭐收藏 or ❌不收藏"]
-    B --> C["Next run loads<br/>7d behavior history"]
-    C --> D["LLM sees your<br/>real preferences"]
-    D --> E["Better picks<br/>next time"]
+    A["每日日报<br/>→ Notion 收件箱"] --> B["你阅读并标记<br/>⭐收藏 或 ❌不收藏"]
+    B --> C["下次运行加载<br/>7 天行为历史"]
+    C --> D["LLM 看到你的<br/>真实偏好"]
+    D --> E["推荐更准"]
     E --> A
 ```
 
-Your real behavior (not declared interests) calibrates the LLM. The more you use it, the better it gets.
+用户的真实行为（不是声明的兴趣）校准 LLM。用得越多越准。
 
 ---
 
-## Quick Start
+## 快速开始
 
 ```bash
-# 1. Install
+# 1. 安装
 pip install -r requirements.txt
 
-# 2. Configure
+# 2. 配置环境变量
 cp .env.example .env
-# Fill in: OPENAI_API_KEY, OPENAI_BASE_URL, NOTION_TOKEN, FOLO_SESSION_TOKEN
+# 填入: OPENAI_API_KEY, OPENAI_BASE_URL, NOTION_TOKEN, FOLO_SESSION_TOKEN
 
-# 3. Run
+# 3. 运行
 python main.py --skip-email
 
-# 4. Output
-# → Notion inbox populated
+# 4. 查看产出
+# → Notion 收件箱已填充
 # → output/2026-03-23/report.pdf + data.json
 ```
 
-### CLI Options
+### 命令行选项
 
 ```bash
-python main.py                                    # Full pipeline
-python main.py --skip-email --skip-notion         # Local only
-python main.py --sources hackernews,arxiv,rss     # Specific sources
-python main.py --interests "AI Agent, SaaS"       # Override interests
-python main.py --cleanup-only                     # Just clean inbox
-python main.py --deep-read-only                   # Just run Deep Reader
+python main.py                                    # 完整管线（2 次 LLM 调用）
+python main.py --skip-email --skip-notion         # 仅本地输出
+python main.py --sources hackernews,arxiv,rss     # 指定数据源
+python main.py --interests "AI Agent, SaaS"       # 覆盖兴趣配置
+python main.py --cleanup-only                     # 仅清理收件箱
+python main.py --deep-read-only                   # 仅运行 Deep Reader
 ```
 
 ---
 
-## Deep Reader
+## Deep Reader：YouTube 字幕深度摘要
 
-Automatic YouTube transcript extraction + AI strategic summary, triggered from Notion.
+对 Notion 中的 YouTube 页面勾选「待深度阅读」→ 自动抓取字幕 → LLM 生成战略摘要 → 写回页面。
 
-### How It Works
+### 工作流程
 
-1. Check **待深度阅读** on any YouTube page in your Notion inbox
-2. Deep Reader fetches the video transcript (zh → en → auto-generated)
-3. LLM generates a structured summary (core arguments, strategic implications, key quotes)
-4. Summary is written back to the Notion page as structured blocks
+1. 在 Notion 收件箱中对任意 YouTube 视频勾选 **待深度阅读**
+2. Deep Reader 获取视频字幕（中文 → 英文 → 自动生成，按顺序尝试）
+3. LLM 生成结构化摘要（核心观点 + 战略含义 + 关键引用 + 值得追踪的信号）
+4. 摘要以结构化 blocks 写回 Notion 页面
 
-### Three Ways to Trigger
+### 三种触发方式
 
-| Method | Command | When to Use |
-|--------|---------|-------------|
-| **Pipeline** | `python main.py` | Runs automatically as Phase 7 |
-| **CLI** | `python main.py --deep-read-only` | Process pending pages on demand |
-| **Webhook** | `POST /api/webhook/deep-read` | Real-time via Notion Automation |
+| 方式 | 命令 | 适用场景 |
+|------|------|---------|
+| **Pipeline 内置** | `python main.py` | 每次跑日报时自动处理（Phase 7） |
+| **CLI** | `python main.py --deep-read-only` | 按需处理待读页面 |
+| **Webhook** | `POST /api/webhook/deep-read` | Notion Automation 实时触发 |
 
-### Webhook Setup (Real-time)
+### Webhook 设置
 
 ```bash
-# 1. Start the API server
-python -m api.server          # → http://localhost:8000
+# 1. 启动 API 服务
+python -m api.server          # → http://localhost:8001
 
-# 2. Expose via ngrok
-ngrok http 8000               # → https://xxxx.ngrok.io
+# 2. 暴露公网
+ngrok http 8001               # → https://xxxx.ngrok-free.dev
 
-# 3. Notion Automation
-# Trigger: 待深度阅读 checkbox changed
-# Action: Send webhook → POST https://xxxx.ngrok.io/api/webhook/deep-read
+# 3. Notion 自动化
+# 触发器: 待深度阅读 checkbox 变更
+# 动作: 发送 webhook → POST https://xxxx.ngrok-free.dev/api/webhook/deep-read
 ```
 
 ---
 
-## Adding Sources (Zero Code)
+## 添加数据源（零代码）
 
-### Add an RSS feed
+**方式 1：Folo app（推荐）**
+打开 [follow.is](https://follow.is)，搜索并关注新的 RSS/Twitter/YouTube → 下次 pipeline 自动拉取
 
-Edit `sources.yaml`:
-
+**方式 2：sources.yaml**
 ```yaml
 rss:
-  - { name: "New Blog", url: "https://example.com/feed.xml", category: "官方一手" }
+  - { name: "新博客", url: "https://example.com/feed.xml", category: "官方一手" }
 ```
 
-### Current sources.yaml
+### 当前数据源
 
-| Source | Type | Category |
-|--------|------|----------|
-| OpenAI News | RSS | 官方一手 |
-| Google DeepMind | RSS | 官方一手 |
-| Google Research | RSS | 官方一手 |
-| Microsoft Research | RSS | 官方一手 |
-| HuggingFace Blog | RSS | AI技术社区 |
-| a16z Future | RSS | 投资机构 |
-| Sequoia Capital | RSS | 投资机构 |
-| Semianalysis | RSS | 独立研究 |
-| Folo | API | 55 subscriptions (Twitter/博客/播客) |
-| YouTube | RSS+Jina | No Priors, Lex Fridman, Karpathy, ... |
-| Hacker News | API | top 15 |
-| arXiv | API | cs.AI, cs.CL, cs.LG |
-| Reddit | API | LocalLLaMA, MachineLearning |
-| GitHub Trending | API | Python |
-| 小红书 | MCP | via xiaohongshu-mcp |
+| 数据源 | 类型 | 内容 | 条数 |
+|--------|------|------|------|
+| **Folo API** | 主力 | 55 个订阅（Twitter 13 人 + 博客 20+ + 播客 + 中文源） | 60 |
+| RSS 订阅 | 补充 | OpenAI/DeepMind/a16z/Semianalysis 等 | 30 |
+| YouTube | 补充 | No Priors/Karpathy/Lex/Fireship/All-In 等 8 频道 | 15 |
+| Hacker News | 补充 | Top 15 全量，不做关键词过滤 | 15 |
+| Reddit | 补充 | r/LocalLLaMA + r/MachineLearning | 10 |
+| GitHub Trending | 补充 | Python 热门仓库 | 10 |
+| arXiv | 补充 | cs.AI / cs.CL / cs.LG | 10 |
+| 小红书 | 可选 | 通过 xiaohongshu-mcp 搜索 | 10 |
 
 ---
 
-## Configuration
+## Notion 配置
 
-### Notion Config Page
+### 配置页面（自动同步）
 
-The system reads your preferences from a Notion page (auto-synced on each run):
+| 章节 | 用途 |
+|------|------|
+| **筛选视角** | 你的角色定位（产品人/投资人/创业者） |
+| **内容优先级** | P1-P4 内容类型排序 |
+| **排除内容** | 永远不选的内容类型 |
+| **长期关注课题** | 长期研究方向 |
+| **指定课题** | 临时关注（留空不启用） |
 
-| Section | Purpose |
-|---------|---------|
-| **筛选视角** | Your perspective (product strategist / investor / founder) |
-| **内容优先级** | P1-P4 ranking of content types |
-| **排除内容** | What to never include |
-| **长期关注课题** | Long-term research topics |
-| **指定课题** | One-shot focus override (leave empty to disable) |
+### Notion 收件箱字段
 
-### config.json
-
-```json
-{
-  "pipeline": {
-    "llm": {
-      "processing_model": "gpt-5.4-mini",
-      "summary_model": "gpt-5.4-mini"
-    },
-    "sources": {
-      "folo": { "enabled": true, "max_items": 60 },
-      "rss": { "enabled": true, "max_items": 30 },
-      "hackernews": { "enabled": true, "max_items": 15 },
-      "youtube": { "enabled": true, "max_items": 15 }
-    }
-  },
-  "schedule": {
-    "relevance_threshold": 5,
-    "max_selected": 25
-  }
-}
-```
-
----
-
-## Notion Inbox Schema
-
-| Column | Type | Description |
-|--------|------|-------------|
-| 名称 | Title (linked) | Clickable title → opens original article |
-| 来源 | Select | Channel (一手/官方 / 深度研究 / 长内容/播客 / 社交/社区/Twitter / 开源/技术/论文) |
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| 名称 | 标题（带链接） | 点击直接跳转原文 |
+| 来源 | Select | 频道分类（一手/深度研究/长内容/社交/开源） |
 | 重要性 | Select | 高 / 中 / 低 |
-| 入选理由 | Rich text | Why LLM selected this item |
-| 摘要 | Rich text | What happened — facts, numbers, who did what (Chinese) |
-| 洞察 | Rich text | Why it matters — judgment, implications, trend confirmation (Chinese) |
-| 媒体来源 | Rich text | Original source name (e.g. "Folo", "YouTube") |
-| 原文链接 | URL | Direct link to source |
-| 收录时间 | Date | Collection date |
-| 选择 | Select | User marks 收藏 or 不收藏 (feeds back to LLM) |
-| 待深度阅读 | Checkbox | Triggers Deep Reader for YouTube pages |
+| 入选理由 | 文本 | LLM 为什么选了这条 |
+| 摘要 | 文本 | what_happened — 谁做了什么，关键数字（中文） |
+| 洞察 | 文本 | why_it_matters — 改变了什么判断（中文） |
+| 选择 | Select | 用户标记收藏/不收藏（反馈给 LLM） |
+| 待深度阅读 | Checkbox | 触发 Deep Reader |
 
 ---
 
-## Pipeline Flow
+## 处理流程
 
 ```mermaid
 sequenceDiagram
-    participant S as Sources<br/>(Folo/RSS/YT/HN/...)
-    participant D as Dedup
-    participant F as Feedback Loader
-    participant L1 as LLM Call 1<br/>(Curation)
-    participant L2 as LLM Call 2<br/>(Executive Summary)
+    participant S as 数据源<br/>(Folo/RSS/YT/HN/...)
+    participant D as 去重
+    participant F as 反馈加载
+    participant L1 as LLM 调用 1<br/>（筛选）
+    participant L2 as LLM 调用 2<br/>（趋势摘要）
     participant N as Notion
-    participant P as PDF/Email
+    participant P as PDF/邮件
 
-    S->>D: 80-150 raw items
-    D->>F: 60-90 unique items
-    F->>N: Query recent 7d 收藏/忽略
-    N-->>F: Behavior signals
-    F->>L1: Items + Profile + Feedback
-    Note over L1: Single call:<br/>classify channels<br/>cluster events<br/>select 10-15<br/>generate what_happened<br/>+ why_it_matters
-    L1->>L2: Selected items
-    Note over L2: Generate executive<br/>summary + trends
-    L2->>N: Write items + digest + run report
-    L2->>P: Generate PDF + send email
-    Note over N: User marks ⭐/❌<br/>→ feeds next run
-    N-.->L1: 待深度阅读 → Deep Reader (separate LLM call)
+    S->>D: 80-150 条原始内容
+    D->>F: 60-90 条去重后
+    F->>N: 查询最近 7 天收藏/忽略
+    N-->>F: 行为信号
+    F->>L1: 内容 + 用户画像 + 反馈
+    Note over L1: 单次调用：<br/>频道分类<br/>事件聚合<br/>选出 10-15 条<br/>生成 what_happened<br/>+ why_it_matters
+    L1->>L2: 入选内容
+    Note over L2: 生成趋势观察<br/>（100-200 字）
+    L2->>N: 写入内容 + 日报 + 运行报告
+    L2->>P: 生成 PDF + 发送邮件
+    Note over N: 用户标记 ⭐/❌<br/>→ 反馈到下次运行
+    N-.->L1: 待深度阅读 → Deep Reader
 ```
 
-**2 LLM calls per run** (was 8): one curation call handles all scoring/classification/summarization, plus one executive summary call.
+**每次运行 2 次 LLM 调用**（之前是 8 次）：1 次筛选 + 1 次趋势摘要。Deep Reader 按需额外调用。
 
 ---
 
-## Project Structure
+## 项目结构
 
 ```
 RSS-Notion/
-├── main.py                    # Pipeline orchestrator + CLI
-├── config.json                # Source/LLM/schedule config
-├── sources.yaml               # Backup RSS feeds (edit this to add sources)
-├── .env                       # API keys (not committed)
+├── main.py                    # 管线编排 + CLI 入口
+├── config.json                # 数据源/LLM/调度配置
+├── sources.yaml               # 补充 RSS 源（改这里加新源）
+├── .env                       # API 密钥（不提交）
 │
-├── sources/                   # Data fetching (no content filtering)
-│   ├── base.py                # BaseSource abstract class
-│   ├── models.py              # SourceItem, ProcessedItem, PipelineResult
-│   ├── folo.py                # Folo RSS reader (primary source, 55 subs)
-│   ├── rss_fetcher.py         # Generic RSS fetcher (reads sources.yaml)
-│   ├── youtube.py             # YouTube channel RSS (Jina Reader fallback)
-│   ├── hackernews.py          # HN top stories
-│   ├── arxiv_source.py        # arXiv papers
-│   ├── reddit.py              # Reddit via PRAW/RSS
+├── sources/                   # 数据抓取（不做内容过滤）
+│   ├── base.py                # BaseSource 抽象基类
+│   ├── models.py              # 数据模型
+│   ├── folo.py                # Folo RSS 阅读器（主力源，55 订阅）
+│   ├── rss_fetcher.py         # 通用 RSS 抓取（读 sources.yaml）
+│   ├── youtube.py             # YouTube（Jina Reader 降级）
+│   ├── hackernews.py          # HN 热帖
+│   ├── arxiv_source.py        # arXiv 论文
+│   ├── reddit.py              # Reddit
 │   ├── github_trending.py     # GitHub Trending
-│   ├── xiaohongshu.py         # 小红书 via MCP server
-│   ├── producthunt.py         # Product Hunt (disabled)
-│   └── tavily_search.py       # Tavily search (disabled)
+│   └── xiaohongshu.py         # 小红书 via MCP
 │
-├── generator/                 # LLM processing
-│   ├── interest_scorer.py     # Strategic curation (channel + feedback loop)
-│   ├── deep_reader.py         # YouTube transcript → AI deep summary
-│   ├── summarizer.py          # Executive summary generation
-│   └── pdf_builder.py         # PDF/PNG via Playwright
+├── generator/                 # LLM 处理
+│   ├── interest_scorer.py     # 信息增量筛选 + 反馈闭环
+│   ├── deep_reader.py         # YouTube 字幕 → AI 深度摘要
+│   ├── summarizer.py          # 趋势观察生成
+│   └── pdf_builder.py         # PDF/PNG 渲染
 │
-├── delivery/                  # Output
-│   ├── notion_writer.py       # Notion write (title=link, 摘要, 洞察, dedup)
-│   └── emailer.py             # SMTP email with attachments
+├── delivery/                  # 输出
+│   ├── notion_writer.py       # Notion 写入（标题链接 + 摘要 + 洞察）
+│   └── emailer.py             # SMTP 邮件
 │
-├── api/                       # Web server + webhooks
-│   ├── server.py              # FastAPI server (trigger, reports, deep-read webhook)
-│   └── webhook.py             # Deep Reader polling watcher (standalone)
+├── api/                       # Web 服务 + Webhook
+│   └── server.py              # FastAPI（触发/报告/Deep Reader webhook）
 │
-├── templates/                 # PDF report templates
+├── templates/                 # PDF 报告模板
 │   ├── daily_report.html
 │   └── styles.css
 │
-└── output/{date}/             # Generated reports
+└── output/{date}/             # 生成的报告
     ├── report.pdf
     ├── report.png
     └── data.json
@@ -331,34 +282,38 @@ RSS-Notion/
 
 ---
 
-## Design Principles
+## 设计原则
 
-1. **Sources fetch, LLM decides** — No hardcoded keyword filtering. Sources fetch unfiltered content; a single LLM call handles all selection and classification.
-
-2. **Information increment > numeric score** — Every pick must tell the reader something they didn't know yesterday. `what_happened` captures facts; `why_it_matters` captures judgment.
-
-3. **Behavior > declared interests** — Your real 收藏/忽略 actions calibrate recommendations better than any keyword list.
-
-4. **Event deduplication** — Same story from 5 sources? Keep the highest-value source, skip the rest.
-
-5. **Minimal LLM calls** — 2 calls per run (curation + summary). Deep Reader adds 1 call per YouTube page on demand.
-
-6. **Fault-tolerant** — Any source can fail without blocking the pipeline. LLM failures fall back to minimal items.
+1. **源只管抓，LLM 只用一次** — 不做硬编码关键词过滤，单次 LLM 调用完成所有筛选和分类
+2. **信息增量 > 数字评分** — 每条入选内容必须告诉读者一个昨天不知道的事实或判断
+3. **行为 > 声明** — 用户的收藏/忽略操作比任何关键词列表都更准确
+4. **事件去重** — 同一件事 5 个源报道？只保留信息量最大的那条
+5. **最少 LLM 调用** — 每次运行 2 次（筛选 + 摘要），Deep Reader 按需额外 1 次
+6. **容错优先** — 任何单源失败不阻塞整体管线
 
 ---
 
-## Environment Variables
+## 4 次关键迭代
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | **Yes** | LLM API key |
-| `OPENAI_BASE_URL` | No | Custom endpoint (EasyCIL, OneAPI, etc.) |
-| `NOTION_TOKEN` | Recommended | Enables Notion read/write + feedback loop |
-| `FOLO_SESSION_TOKEN` | Recommended | Folo RSS reader session token |
-| `REDDIT_CLIENT_ID` | No | Reddit OAuth (falls back to RSS) |
-| `REDDIT_CLIENT_SECRET` | No | Reddit OAuth |
-| `SMTP_HOST` / `SMTP_PORT` | No | Email delivery |
-| `SMTP_USER` / `SMTP_PASSWORD` | No | Email auth |
+| 版本 | 做法 | 发现的问题 | 决策 |
+|------|------|-----------|------|
+| V1 | 30+ 关键词正则过滤 | "token"匹配到币圈，新话题需手动加词 | 删掉源端过滤，全量进 LLM |
+| V2 | 信息层级 A-E 分类 | Elon 转推=A 类，36kr 水资源=C 类，按身份不按内容 | 改为信息增量判断 |
+| V3 | 两个问题：有增量吗？跟战略有关吗？ | 有效，但 7 批×15 条 = 8 次 LLM 调用太多 | 压缩到单次全量 |
+| V4 | 单次调用 + 精简输出字段 | 当前版本 | 2 次调用，50 秒完成 |
+
+---
+
+## 环境变量
+
+| 变量 | 必需 | 说明 |
+|------|------|------|
+| `OPENAI_API_KEY` | **是** | LLM API 密钥 |
+| `OPENAI_BASE_URL` | 否 | 自定义端点（EasyCIL 等代理） |
+| `NOTION_TOKEN` | 推荐 | 启用 Notion 读写 + 反馈闭环 |
+| `FOLO_SESSION_TOKEN` | 推荐 | Folo RSS 阅读器 session token |
+| `REDDIT_CLIENT_ID` | 否 | Reddit OAuth（无则降级 RSS） |
+| `SMTP_HOST` / `SMTP_PORT` | 否 | 邮件发送 |
 
 ---
 
