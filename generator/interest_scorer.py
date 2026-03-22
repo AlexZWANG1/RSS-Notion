@@ -469,6 +469,9 @@ def _build_scoring_prompt(
         "- include: boolean\n"
         "- event_cluster: string（同一事件标注事件名，否则空字符串）\n"
         "- topic: string（简洁话题标签）\n"
+        "- source_category: string（信息源分类，必须是以下之一：官方一手 / 独立研究机构 / "
+        "投资机构报告 / 科技媒体 / AI技术社区 / 论文与评审 / 社交/社区/视频 / 个人分析师 / 数据/榜单/基准。"
+        "根据内容本身判断，不要只看来源名称）\n"
         "- importance: string（高/中/低）\n"
         "- one_line_summary: string（中文，50-100字，必须包含「新增量是什么」）\n"
         "- key_insight: string（一句英文，这条内容的核心新信息）\n"
@@ -556,6 +559,7 @@ async def score_items(
                                 score=raw_score,
                                 include=bool(entry.get("include", False)),
                                 topic=entry.get("topic", ""),
+                                source_category=entry.get("source_category", ""),
                                 event_cluster=entry.get("event_cluster", ""),
                                 importance=importance,
                                 one_line_summary=entry.get("one_line_summary", ""),
