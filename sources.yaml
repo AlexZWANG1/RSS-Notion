@@ -21,7 +21,7 @@ rss:
 
   # ── 中文源（从 Folo 导入）──
   - { name: "机器之心", url: "https://www.jiqizhixin.com/rss", category: "科技媒体" }
-  - { name: "36kr AI", url: "https://rsshub.app/36kr/user/5369499", category: "科技媒体" }
+  - { name: "36kr", url: "https://36kr.com/feed", category: "科技媒体" }
 
   # ── Twitter/X 头部账号（via RSSHub 私有实例）──
   - { name: "Sam Altman", url: "https://rsshub.shaomingbo.com/twitter/user/sama", category: "Twitter" }

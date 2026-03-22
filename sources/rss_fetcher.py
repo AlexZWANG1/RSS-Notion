@@ -111,7 +111,12 @@ class RSSFetcher(BaseSource):
     @staticmethod
     async def _download_feed(url: str) -> str:
         """Download raw feed XML via aiohttp."""
-        async with aiohttp.ClientSession() as session:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "application/rss+xml, application/xml, text/xml, */*",
+        }
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 resp.raise_for_status()
                 return await resp.text()
