@@ -1,148 +1,149 @@
-"""Folo RSS source — reads curated RSS items from the Notion inbox database."""
+"""Folo source — fetches recent articles from the Folo RSS reader API.
+
+Uses the Folo (follow.is) API to pull articles from the user's
+subscriptions. This is the primary RSS source — the user manages
+all their RSS/Twitter/YouTube subscriptions in Folo, and the pipeline
+pulls unread content from there.
+
+Requires FOLO_SESSION_TOKEN in environment.
+"""
 
 import asyncio
-import json
 import logging
 import os
-import re
-from datetime import date
-from pathlib import Path
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+import httpx
 
 from sources.base import BaseSource
 from sources.models import SourceItem
 
 logger = logging.getLogger(__name__)
 
-# Prefixes to strip from titles
-_TITLE_PREFIXES = re.compile(r"^\[[^\]]+\]\s*")
-
-
-def _plain_text(rich_text_array: list) -> str:
-    """Extract plain text from a Notion rich_text property value."""
-    return "".join(seg.get("plain_text", "") for seg in rich_text_array)
-
-
-def _title_text(title_array: list) -> str:
-    """Extract plain text from a Notion title property value."""
-    return "".join(seg.get("plain_text", "") for seg in title_array)
+_API_BASE = "https://api.follow.is"
 
 
 class FoloSource(BaseSource):
-    """Fetches today's RSS-curated items from the Notion inbox database."""
+    """Fetch recent articles from Folo RSS reader subscriptions."""
 
-    name = "RSS精选 (Folo)"
+    name = "Folo"
     icon = "📰"
 
     def __init__(self, config: dict):
         super().__init__(config)
-        self._database_id = config.get("database_id")
+        self.session_token = os.environ.get("FOLO_SESSION_TOKEN", "")
+        self.max_age_days = config.get("max_age_days", 3)
 
-    def _resolve_database_id(self) -> str | None:
-        """Return the database ID from config, or fall back to config.json."""
-        if self._database_id:
-            return self._database_id
+    def _headers(self) -> dict:
+        return {
+            "Cookie": f"__Secure-better-auth.session_token={self.session_token};",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Content-Type": "application/json",
+        }
 
-        config_path = Path(__file__).resolve().parent.parent / "config.json"
+    async def _fetch(self) -> list[SourceItem]:
+        if not self.session_token:
+            logger.warning("[Folo] FOLO_SESSION_TOKEN not set — skipping")
+            return []
+
+        async with httpx.AsyncClient(timeout=30.0, headers=self._headers()) as client:
+            # Get all subscriptions to build a feed title map
+            subs_map = await self._load_subscriptions(client)
+
+            # Fetch recent entries
+            items = await self._fetch_entries(client, subs_map)
+
+        logger.info(f"[Folo] Fetched {len(items)} items from {len(subs_map)} subscriptions")
+        return items
+
+    async def _load_subscriptions(self, client: httpx.AsyncClient) -> dict[str, str]:
+        """Load subscription ID → title mapping."""
         try:
-            with open(config_path, encoding="utf-8") as f:
-                data = json.load(f)
-            db_id = data.get("notion", {}).get("inbox_database_id")
-            if db_id:
-                return db_id
-        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
-            logger.warning(f"[{self.name}] Could not read config.json: {e}")
+            resp = await client.get(f"{_API_BASE}/subscriptions")
+            resp.raise_for_status()
+            data = resp.json()
 
-        return None
+            sub_map: dict[str, str] = {}
+            for sub in data.get("data", []):
+                feed_id = sub.get("feedId", "")
+                feeds = sub.get("feeds") or {}
+                title = feeds.get("title", "") or sub.get("title", "") or "(unknown)"
+                if feed_id:
+                    sub_map[feed_id] = title
 
-    def _query_notion(self, token: str, database_id: str) -> list[dict]:
-        """Query Notion database via raw HTTP (notion-client v3 removed databases.query)."""
-        import httpx
+            return sub_map
+        except Exception as e:
+            logger.warning(f"[Folo] Failed to load subscriptions: {e}")
+            return {}
 
-        today_str = date.today().isoformat()
+    async def _fetch_entries(
+        self, client: httpx.AsyncClient, subs_map: dict[str, str]
+    ) -> list[SourceItem]:
+        """Fetch recent entries across all subscriptions."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.max_age_days)
+        items: list[SourceItem] = []
+        seen_urls: set[str] = set()
 
-        response = httpx.post(
-            f"https://api.notion.com/v1/databases/{database_id}/query",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Notion-Version": "2022-06-28",
-                "Content-Type": "application/json",
-            },
-            json={
-                "filter": {
-                    "and": [
-                        {
-                            "property": "收录时间",
-                            "date": {"equals": today_str},
-                        },
-                    ]
-                },
-            },
-            timeout=20.0,
-        )
-        response.raise_for_status()
-        return response.json().get("results", [])
+        try:
+            resp = await client.post(f"{_API_BASE}/entries", json={})
+            resp.raise_for_status()
+            data = resp.json()
 
-    def _parse_page(self, page: dict) -> SourceItem | None:
-        """Convert a single Notion page into a SourceItem."""
-        props = page.get("properties", {})
+            for wrapper in data.get("data", []):
+                # Folo API nests entry data inside wrapper.entries
+                entry = wrapper.get("entries") or {}
+                feeds = wrapper.get("feeds") or {}
+                item = self._parse_entry(entry, feeds, cutoff)
+                if item and item.url not in seen_urls:
+                    seen_urls.add(item.url)
+                    items.append(item)
 
-        # Title (名称)
-        raw_title = _title_text(props.get("名称", {}).get("title", []))
-        if not raw_title:
+        except Exception as e:
+            logger.warning(f"[Folo] Failed to fetch entries: {e}")
+
+        return items
+
+    def _parse_entry(
+        self, entry: dict, feeds: dict, cutoff: datetime
+    ) -> Optional[SourceItem]:
+        """Parse a Folo API entry into a SourceItem."""
+        title = (entry.get("title") or "").strip()
+        url = (entry.get("url") or entry.get("guid") or "").strip()
+
+        if not title or not url:
             return None
-        title = _TITLE_PREFIXES.sub("", raw_title).strip()
 
-        # URL (原文链接)
-        url = props.get("原文链接", {}).get("url") or ""
-        if not url:
+        # Parse published date
+        published = None
+        pub_str = entry.get("publishedAt") or entry.get("insertedAt") or ""
+        if pub_str:
+            try:
+                published = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        # Filter by age
+        if published and published < cutoff:
             return None
 
-        # Topic (话题)
-        topic_obj = props.get("话题", {}).get("select")
-        topic = topic_obj["name"] if topic_obj else ""
+        # Source name from feed info
+        source_name = feeds.get("title", "") or "Folo"
 
-        # Importance (重要性)
-        importance_obj = props.get("重要性", {}).get("select")
-        importance = importance_obj["name"] if importance_obj else ""
+        # Description
+        description = (entry.get("description") or entry.get("content") or "")[:500]
+        if description and "<" in description:
+            import re
+            from html import unescape
+            description = re.sub(r"<[^>]+>", "", unescape(description)).strip()
 
-        # Media source (媒体来源)
-        media_source = _plain_text(props.get("媒体来源", {}).get("rich_text", []))
+        author = entry.get("author") or ""
 
         return SourceItem(
             title=title,
             url=url,
-            source_name=media_source or self.name,
-            description="",
-            extra={
-                "importance": importance,
-                "topic": topic,
-            },
+            source_name=source_name,
+            description=description,
+            author=author,
+            published=published,
         )
-
-    async def _fetch(self) -> list[SourceItem]:
-        token = os.environ.get("NOTION_TOKEN", "")
-        if not token:
-            logger.warning(
-                f"[{self.name}] NOTION_TOKEN not set — skipping Notion query"
-            )
-            return []
-
-        database_id = self._resolve_database_id()
-        if not database_id:
-            logger.warning(
-                f"[{self.name}] No database ID configured — skipping"
-            )
-            return []
-
-        loop = asyncio.get_running_loop()
-        pages = await loop.run_in_executor(
-            None, self._query_notion, token, database_id
-        )
-
-        items: list[SourceItem] = []
-        for page in pages:
-            item = self._parse_page(page)
-            if item:
-                items.append(item)
-
-        return items

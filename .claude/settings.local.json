@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__notebooklm-mcp__notebook_list",
+      "Bash(python -c \":*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:playbooks.com)",
+      "WebFetch(domain:skywork.ai)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(curl -s https://api.github.com/repos/RSSNext/Folo/git/trees/dev?recursive=1)",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(x[''''path'''']\\) for x in data.get\\(''''tree'''',[]\\) if any\\(k in x[''''path''''].lower\\(\\) for k in [''''client-sdk'''',''''hono'''',''''route'''',''''server/src'''']\\) and x[''''path''''].endswith\\(''''.ts''''\\)]\")",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(x[''''path'''']\\) for x in data.get\\(''''tree'''',[]\\) if ''''cli'''' in x[''''path''''] and x[''''path''''].endswith\\(''''.ts''''\\)]\")"
+    ]
+  }
+}
