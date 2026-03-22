@@ -42,36 +42,33 @@ def _extract_video_id(url: str) -> Optional[str]:
 
 
 async def fetch_transcript(video_id: str) -> Optional[str]:
-    """Fetch YouTube transcript, trying multiple languages."""
+    """Fetch YouTube transcript using youtube-transcript-api v1.x."""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
 
         loop = asyncio.get_running_loop()
+        api = YouTubeTranscriptApi()
 
-        # Try languages in order: Chinese, English, auto-generated
-        for lang in [["zh-Hans", "zh"], ["en"], ["en-US"]]:
-            try:
-                segments = await loop.run_in_executor(
-                    None,
-                    lambda l=lang: YouTubeTranscriptApi.get_transcript(video_id, languages=l),
-                )
-                text = " ".join(s["text"] for s in segments)
-                if len(text) > 100:
-                    return text
-            except Exception:
-                continue
-
-        # Last resort: any available transcript
+        # Try fetching transcript (auto-detects best language)
         try:
-            transcript_list = await loop.run_in_executor(
-                None,
-                lambda: YouTubeTranscriptApi.list_transcripts(video_id),
-            )
+            transcript = await loop.run_in_executor(None, lambda: api.fetch(video_id))
+            text = " ".join(s.text for s in transcript.snippets)
+            if len(text) > 100:
+                return text
+        except Exception as e:
+            logger.info(f"Default transcript failed for {video_id}: {e}")
+
+        # Try listing and picking best available
+        try:
+            transcript_list = await loop.run_in_executor(None, lambda: api.list(video_id))
             for t in transcript_list:
-                segments = await loop.run_in_executor(None, t.fetch)
-                text = " ".join(s["text"] for s in segments)
-                if len(text) > 100:
-                    return text
+                try:
+                    fetched = await loop.run_in_executor(None, t.fetch)
+                    text = " ".join(s.text for s in fetched.snippets)
+                    if len(text) > 100:
+                        return text
+                except Exception:
+                    continue
         except Exception:
             pass
 
