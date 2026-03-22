@@ -185,10 +185,18 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 logger.info("Skipping duplicate: %s", title)
                 continue
 
-            _VALID_CHANNELS = {"一手/深度研究", "长内容", "社交/社区", "开源/论文", "系统"}
+            # Map LLM channel output to Notion select options (with colors)
+            _CHANNEL_MAP = {
+                "一手/深度研究": "一手/官方",
+                "长内容": "长内容/播客",
+                "社交/社区": "社交/社区/Twitter",
+                "开源/论文": "开源/技术/论文",
+            }
+            _VALID_CHANNELS = set(_CHANNEL_MAP.values()) | {"深度研究", "系统"}
             ch = getattr(item, "channel", "") or ""
+            ch = _CHANNEL_MAP.get(ch, ch)
             if ch not in _VALID_CHANNELS:
-                ch = "开源/论文"
+                ch = "开源/技术/论文"
 
             properties = _build_item_properties(
                 title=title,
@@ -338,10 +346,13 @@ async def write_digest_to_notion(
 
     # Channel sections
     _CHANNEL_ICONS = {
-        "一手/深度研究": "📰", "长内容": "🎬",
-        "社交/社区": "💬", "开源/论文": "🔧",
+        "一手/深度研究": "\U0001f4f0", "一手/官方": "\U0001f4f0",
+        "深度研究": "\U0001f52c",
+        "长内容": "\U0001f3ac", "长内容/播客": "\U0001f3ac",
+        "社交/社区": "\U0001f4ac", "社交/社区/Twitter": "\U0001f4ac",
+        "开源/论文": "\U0001f527", "开源/技术/论文": "\U0001f527",
     }
-    for ch_name in ["一手/深度研究", "长内容", "社交/社区", "开源/论文"]:
+    for ch_name in ["一手/深度研究", "一手/官方", "深度研究", "长内容", "长内容/播客", "社交/社区", "社交/社区/Twitter", "开源/论文", "开源/技术/论文"]:
         items_in_ch = by_channel.get(ch_name, [])
         if not items_in_ch:
             continue
