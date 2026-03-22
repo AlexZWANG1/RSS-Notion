@@ -421,60 +421,58 @@ def _build_scoring_prompt(
         feedback_section = "\n## 读者最近的真实行为（最重要的校准信号）\n" + "\n".join(fb_lines) + "\n"
 
     return (
-        "你是一个面向 AI 产业战略决策者的信息策展人。\n\n"
+        "你是一个服务于 AI 产业战略投资分析师的信息筛选器。\n\n"
 
-        "## 读者画像\n"
+        "## 你的读者\n"
         f"**视角**: {interests.perspective}\n"
         f"**长期关注**: {topics_text}\n"
         f"**追踪关键词**: {keywords_text}\n"
         f"{designated_section}\n"
-        "这位读者是产品策略师和投资者。他不需要知道「发生了什么」——"
-        "他需要知道「这意味着什么」和「谁在一手推动这件事」。\n"
+        "这位读者每天只看 10-15 条内容。他需要的不是「发生了什么」，"
+        "而是「有什么新的事实或判断，能改变我对某个赛道/公司/技术方向的认知」。\n"
         f"{feedback_section}\n"
 
-        "## 信息层级（你的核心判断维度）\n"
-        "对每条内容判断其信息层级：\n"
-        "- **A. 一手信息**：创始人/CEO亲自写的、官方公告、原始研究报告、投资人自己的判断\n"
-        "- **B. 深度分析**：有原创观点的分析文章（不是转述别人的观点）\n"
-        "- **C. 二手报道**：媒体对事件的报道、总结、转述\n"
-        "- **D. 社区讨论**：Reddit/HN/小红书上的讨论帖、问答\n"
-        "- **E. 教程/工具**：how-to、入门指南、工具推荐、消费者内容\n\n"
+        "## 核心判断标准：信息增量\n"
+        "对每条内容，依次回答三个问题：\n\n"
 
-        "## 选择规则\n"
-        "1. **事件去重**：多个源报道同一件事时，只保留信息层级最高的来源，"
-        "用 event_cluster 标注同一事件\n"
-        "2. **按层级选择**：\n"
-        "   - A 类（一手信息）→ 几乎全选\n"
-        "   - B 类（深度分析）→ 选最好的几篇\n"
-        "   - C 类（二手报道）→ 同一事件只留一条\n"
-        "   - D 类（社区讨论）→ 只有真正有独特见解的才选\n"
-        "   - E 类（教程/工具/消费者内容）→ 基本不选\n"
-        "3. **优先级排序**：\n"
-        "   P1: 行业趋势的深度分析（有数据、有判断、有原创观点）\n"
-        "   P2: 创始人/投资人的一手表态或判断\n"
-        "   P3: 头部公司的重要产品/战略动作（选官方一手源）\n"
-        "   P4: 改变竞争格局的技术突破或开源项目\n\n"
+        "### Q1: 有没有信息增量？\n"
+        "「读完这条，读者能知道一个他昨天还不知道的事实、数据、判断或趋势吗？」\n"
+        "- 纯转发、RT、没有附加观点的转推 -> 无增量，排除\n"
+        "- 多个源报道同一件事 -> 只保留信息量最大的那条，其余排除\n"
+        "- 同一个人连续发的多条推文/同一期播客的多个片段 -> 合并为一条，只保留最有信息量的\n"
+        "- 标题党、泛泛而谈、没有具体数据或判断的内容 -> 无增量，排除\n\n"
 
-        "## 强排除规则\n"
-        "直接排除，不管看起来多'AI相关'：\n"
-        "- 入门教程、how-to指南、'如何使用X'类内容\n"
-        "- 没有原创观点的纯新闻转述（除非是首发重大消息）\n"
-        "- 消费者导向内容（AI穿搭、AI滤镜、AI手机功能）\n"
-        "- 泛泛而谈没有数据或具体判断的水文\n\n"
+        "### Q2: 跟 AI 产业战略相关吗？\n"
+        "「这条信息会影响读者对一个公司、一个赛道、一个技术方向、或一个商业模式的判断吗？」\n"
+        "- 与 AI/科技产业战略无关的内容 -> 排除（哪怕来自关注的源）\n"
+        "- 消费者导向的 AI 应用（AI 滤镜、AI 穿搭）-> 排除\n"
+        "- 入门教程、how-to 指南 -> 排除\n\n"
+
+        "### Q3: 增量有多深？\n"
+        "通过了 Q1 和 Q2 的内容，按深度分三档：\n"
+        "- **深**：包含独家数据、一手战略判断、原创分析框架、改变竞争格局的技术突破 -> 优先入选\n"
+        "- **中**：有观点但论据不充分，或是重要事件的首发报道 -> 酌情入选\n"
+        "- **浅**：只是陈述事实，没有分析 -> 一般不选，除非是重大事件的第一手确认\n\n"
+
+        "## 去重规则（在 Q1 之前先执行）\n"
+        "- 同一事件/话题：只保留信息量最大、分析最深的 1 条，用 event_cluster 标注\n"
+        "- 同一个人的多条内容：只保留最有信息量的 1-2 条\n"
+        "- 同一期播客/访谈的多个片段：只保留 1 条，摘要中涵盖关键要点\n\n"
+
+        "## 目标数量\n"
+        "每批精选 3-8 条。宁缺毋滥——如果候选内容质量普遍不高，选 1-2 条也行。"
+        "不要为了凑数降低标准。\n\n"
 
         "## 输出格式\n"
         "返回 JSON，key 为 \"items\"，value 为数组。每个元素：\n"
-        "- index: int（输入的 [i] 索引）\n"
-        "- include: boolean（是否入选今日日报）\n"
-        "- source_tier: string（A/B/C/D/E 信息层级）\n"
-        "- event_cluster: string（如果与其他条目讲同一件事，标注事件名，否则空字符串）\n"
-        "- topic: string（简洁的话题标签）\n"
+        "- index: int\n"
+        "- include: boolean\n"
+        "- event_cluster: string（同一事件标注事件名，否则空字符串）\n"
+        "- topic: string（简洁话题标签）\n"
         "- importance: string（高/中/低）\n"
-        "- one_line_summary: string（中文，50-100字，包含背景和核心观点。"
-        "例：'谷歌发布Gemini 2.0，首次支持原生多模态输出和AI Agent调用工具，"
-        "标志着从信息检索向任务执行的范式转变'）\n"
-        "- key_insight: string（一句英文核心洞察）\n"
-        "- score_reason: string（1-2句，为什么选/不选这条）\n\n"
+        "- one_line_summary: string（中文，50-100字，必须包含「新增量是什么」）\n"
+        "- key_insight: string（一句英文，这条内容的核心新信息）\n"
+        "- score_reason: string（1-2句，回答「为什么选/不选」，必须引用 Q1/Q2/Q3 的判断）\n\n"
 
         f"候选内容（{len(items)}条）：\n\n{items_text}"
     )
@@ -548,10 +546,9 @@ async def score_items(
                         if importance not in ("高", "中", "低"):
                             importance = "中"
 
-                        # Derive score from source_tier for backwards compat
-                        tier = entry.get("source_tier", "C")
-                        tier_scores = {"A": 9, "B": 7, "C": 5, "D": 3, "E": 1}
-                        raw_score = tier_scores.get(tier, 5)
+                        # Derive score from importance for backwards compat
+                        imp_scores = {"高": 9, "中": 5, "低": 2}
+                        raw_score = imp_scores.get(importance, 5)
 
                         results.append(
                             ScoredItem(
@@ -559,7 +556,6 @@ async def score_items(
                                 score=raw_score,
                                 include=bool(entry.get("include", False)),
                                 topic=entry.get("topic", ""),
-                                source_tier=tier,
                                 event_cluster=entry.get("event_cluster", ""),
                                 importance=importance,
                                 one_line_summary=entry.get("one_line_summary", ""),
