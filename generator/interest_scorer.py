@@ -469,7 +469,7 @@ def _build_scoring_prompt(
         '      "include": true,\n'
         '      "event_cluster": "事件名或空字符串",\n'
         '      "topic": "简洁话题标签",\n'
-        '      "source_category": "官方一手/独立研究机构/投资机构报告/科技媒体/AI技术社区/论文与评审/社交/社区/视频/个人分析师/数据/榜单/基准（根据内容判断）",\n'
+        '      "source_category": "必须是以下6个之一：官方一手（OpenAI/Google/Meta等官方发布）、深度研究（Semianalysis/a16z等深度分析）、科技媒体（36kr/The Verge等媒体报道）、社交/视频（Twitter/Reddit/YouTube/小红书/播客）、开源/技术（GitHub/arXiv/HN技术帖）、投资/商业（融资/VC/商业模式分析）",\n'
         '      "importance": "高/中/低",\n'
         '      "one_line_summary": "中文50-100字，必须写清楚新增量是什么",\n'
         '      "key_insight": "一句英文核心新信息",\n'

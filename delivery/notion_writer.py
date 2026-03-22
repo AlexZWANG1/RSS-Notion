@@ -193,15 +193,15 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 logger.info("Skipping duplicate: %s", title)
                 continue
 
-            # Use LLM-assigned source_category, fallback to AI技术社区
+            # Use LLM-assigned source_category
             _VALID_CATEGORIES = {
-                "科技媒体", "AI技术社区", "论文与评审", "社交/社区/视频",
-                "官方一手", "个人分析师", "数据/榜单/基准", "投资机构报告",
-                "独立研究机构", "系统", "手动",
+                "官方一手", "深度研究", "科技媒体",
+                "社交/视频", "开源/技术", "投资/商业",
+                "系统",
             }
             source_label = getattr(item, "source_category", "") or ""
             if source_label not in _VALID_CATEGORIES:
-                source_label = "AI技术社区"
+                source_label = "开源/技术"
 
             properties = _build_item_properties(
                 title=title,
@@ -286,80 +286,90 @@ async def write_digest_to_notion(
     page_title = f"[AI日报] {today} AI 产业日报"
     properties = _build_item_properties(
         title=page_title,
-        source="AI技术社区",
+        source="系统",
         topic="AI 日报",
         importance="高",
         today=today,
     )
 
-    # Build structured blocks
+    # Build structured blocks — directly from selected items, not from summary text
     blocks: list[dict[str, Any]] = []
 
-    # Header callout
+    def _heading2(t):
+        return {"type": "heading_2", "heading_2": {"rich_text": [{"text": {"content": t}}]}}
+    def _heading3(t):
+        return {"type": "heading_3", "heading_3": {"rich_text": [{"text": {"content": t}}]}}
+    def _divider():
+        return {"type": "divider", "divider": {}}
+    def _linked_bullet(title, url, source_name):
+        rt: dict[str, Any] = {"content": title}
+        if url:
+            rt["link"] = {"url": url}
+        return {
+            "type": "bulleted_list_item",
+            "bulleted_list_item": {
+                "rich_text": [
+                    {"text": {"content": f"[{source_name}] "}, "annotations": {"color": "gray"}},
+                    {"text": rt, "annotations": {"bold": True}},
+                ],
+            },
+        }
+
+    # Header
     blocks.append({
         "type": "callout",
         "callout": {
             "rich_text": [{"text": {"content":
-                f"今日扫描 {total_items} 条内容，精选 {len(selected)} 条"
+                f"\u4eca\u65e5\u626b\u63cf {total_items} \u6761\uff0c\u7cbe\u9009 {len(selected)} \u6761"
             }}],
             "icon": {"type": "emoji", "emoji": "\U0001f4ca"},
         },
     })
 
-    # Executive summary
-    blocks.append({
-        "type": "heading_2",
-        "heading_2": {"rich_text": [{"text": {"content": "趋势摘要"}}]},
-    })
-    # Split summary into paragraphs
-    for para in summary.split("\n"):
-        para = para.strip()
-        if para:
+    # Split selected into strategy vs tech based on source_category
+    _STRATEGY_CATS = {"官方一手", "科技媒体", "投资/商业", "深度研究"}
+    strategy = [s for s in selected if getattr(s, "source_category", "") in _STRATEGY_CATS
+                or s.importance == "高"]
+    tech = [s for s in selected if s not in strategy]
+
+    # Part 1: 🔵 战略与商业
+    if strategy:
+        blocks.append(_heading2("\U0001f535 \u6218\u7565\u4e0e\u5546\u4e1a"))
+        for s in strategy:
+            blocks.append(_linked_bullet(
+                s.original.title, s.original.url, s.original.source_name
+            ))
+            if s.one_line_summary:
+                blocks.append(_text_block(f"    {s.one_line_summary}"))
+            if len(blocks) >= 90:
+                break
+
+    if strategy and tech:
+        blocks.append(_divider())
+
+    # Part 2: 🟢 技术动态
+    if tech:
+        blocks.append(_heading2("\U0001f7e2 \u6280\u672f\u52a8\u6001"))
+        for s in tech:
+            blocks.append(_linked_bullet(
+                s.original.title, s.original.url, s.original.source_name
+            ))
+            if s.one_line_summary:
+                blocks.append(_text_block(f"    {s.one_line_summary}"))
+            if len(blocks) >= 95:
+                break
+
+    # Part 3: Executive summary as trend observation
+    if summary:
+        blocks.append(_divider())
+        blocks.append(_heading2("\U0001f4c8 \u8d8b\u52bf\u89c2\u5bdf"))
+        # Only take first 3 paragraphs to stay under block limit
+        paras = [p.strip() for p in summary.split("\n") if p.strip()]
+        for para in paras[:5]:
+            if len(blocks) >= 98:
+                break
             blocks.append(_text_block(para))
 
-    blocks.append({"type": "divider", "divider": {}})
-
-    # Selected items grouped by importance
-    blocks.append({
-        "type": "heading_2",
-        "heading_2": {"rich_text": [{"text": {"content": "精选内容"}}]},
-    })
-
-    high = [s for s in selected if s.importance == "高"]
-    medium = [s for s in selected if s.importance == "中"]
-    low = [s for s in selected if s.importance == "低"]
-
-    for group, label in [(high, "高重要性"), (medium, "中重要性"), (low, "其他")]:
-        if not group:
-            continue
-        blocks.append({
-            "type": "heading_3",
-            "heading_3": {"rich_text": [{"text": {"content": f"{label}（{len(group)} 条）"}}]},
-        })
-        for s in group:
-            # Title as linked text
-            title_rt: dict[str, Any] = {"content": f"[{s.original.source_name}] {s.original.title}"}
-            if s.original.url:
-                title_rt["link"] = {"url": s.original.url}
-            blocks.append({
-                "type": "bulleted_list_item",
-                "bulleted_list_item": {
-                    "rich_text": [
-                        {"text": title_rt, "annotations": {"bold": True}},
-                    ],
-                },
-            })
-            if s.one_line_summary:
-                blocks.append(_text_block(f"   {s.one_line_summary}"))
-
-            # Stop at 95 blocks to stay under Notion's 100 limit
-            if len(blocks) >= 93:
-                blocks.append(_text_block("... 更多内容请查看收件箱"))
-                break
-        if len(blocks) >= 93:
-            break
-
-    # Cap at 100 blocks
     blocks = blocks[:98]
 
     try:
