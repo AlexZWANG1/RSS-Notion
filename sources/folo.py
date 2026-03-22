@@ -85,16 +85,23 @@ class FoloSource(BaseSource):
         items: list[SourceItem] = []
         seen_urls: set[str] = set()
 
+        # Sources that have their own dedicated fetcher — skip in Folo to avoid duplicates
+        _SKIP_SOURCES = {"Hacker News", "hacker news", "HackerNews"}
+
         try:
-            # Fetch more entries (default is 20, request up to 100)
             resp = await client.post(f"{_API_BASE}/entries", json={"limit": 100})
             resp.raise_for_status()
             data = resp.json()
 
             for wrapper in data.get("data", []):
-                # Folo API nests entry data inside wrapper.entries
                 entry = wrapper.get("entries") or {}
                 feeds = wrapper.get("feeds") or {}
+
+                # Skip sources that have dedicated API fetchers
+                feed_title = feeds.get("title", "")
+                if feed_title in _SKIP_SOURCES:
+                    continue
+
                 item = self._parse_entry(entry, feeds, cutoff)
                 if item and item.url not in seen_urls:
                     seen_urls.add(item.url)

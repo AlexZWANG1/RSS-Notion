@@ -49,17 +49,18 @@ def load_config() -> dict:
         return json.load(f)
 
 
+# Order matters: first sources get priority in dedup (_pre_filter keeps first seen)
 SOURCE_CLASSES = {
-    "hackernews": HackerNewsSource,
-    "arxiv": ArxivSource,
+    "folo": FoloSource,            # 最高优先级：用户订阅的 Twitter/博客/播客
+    "rss": RSSFetcher,             # 补充 RSS（官方博客/投资机构）
+    "youtube": YouTubeSource,      # YouTube 频道
+    "hackernews": HackerNewsSource, # 补充源
     "reddit": RedditSource,
-    "producthunt": ProductHuntSource,
+    "arxiv": ArxivSource,
     "github_trending": GitHubTrendingSource,
-    "folo": FoloSource,
-    "youtube": YouTubeSource,
     "xiaohongshu": XiaohongshuSource,
-    "rss": RSSFetcher,
     "tavily": TavilySearchSource,
+    "producthunt": ProductHuntSource,
 }
 
 

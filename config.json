@@ -19,13 +19,13 @@
   },
   "pipeline": {
     "sources": {
-      "folo": { "enabled": true, "max_items": 80 },
-      "hackernews": { "enabled": true, "max_items": 20 },
-      "arxiv": { "enabled": true, "categories": ["cs.AI", "cs.CL", "cs.LG"], "max_items": 20 },
+      "folo": { "enabled": true, "max_items": 60 },
+      "rss": { "enabled": true, "max_items": 30, "max_age_days": 7 },
+      "hackernews": { "enabled": true, "max_items": 15 },
+      "arxiv": { "enabled": true, "categories": ["cs.AI", "cs.CL", "cs.LG"], "max_items": 10 },
       "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
       "producthunt": { "enabled": false, "max_items": 10 },
       "github_trending": { "enabled": true, "language": "python", "max_items": 10 },
-      "rss": { "enabled": true, "max_items": 50, "max_age_days": 3 },
       "tavily": {
         "enabled": true,
         "max_items": 20,
