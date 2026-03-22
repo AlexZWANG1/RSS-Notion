@@ -51,25 +51,49 @@ def _build_batch_prompt(items: list[SourceItem]) -> str:
 
 
 def _build_executive_summary_prompt(items: list[ProcessedItem]) -> str:
-    """Build the executive summary prompt."""
+    """Build the daily report prompt with strategy/tech split."""
     entries = []
     for item in items:
         entries.append(
-            f"- [{item.category}] {item.one_line_summary or item.original.title} "
-            f"(source: {item.original.source_name}, relevance: {item.relevance})\n"
+            f"- [{item.original.source_name}] {item.one_line_summary or item.original.title}\n"
+            f"  URL: {item.original.url}\n"
             f"  Insight: {item.key_insight}"
         )
     items_text = "\n".join(entries)
 
     return (
-        "You are a senior AI industry analyst writing a daily briefing.\n\n"
-        "Based on the following processed news items, write a 200-400 word executive "
-        "summary in Chinese. Your summary must:\n"
-        "1. Extract the top 3 trends or themes from today's items\n"
-        "2. Identify cross-source connections (patterns that appear across different sources)\n"
-        "3. Provide forward-looking insight on what these developments mean\n\n"
-        "Write in a professional, concise style suitable for a tech executive audience.\n\n"
-        f"Today's items:\n\n{items_text}"
+        "你是一位AI产业战略分析师的日报撰写助手。\n\n"
+        "读者是产品策略师和投资人，关心商业判断和竞争格局，不是技术实现。\n"
+        "他需要知道「Mamba-3可能威胁Transformer的主导地位」，"
+        "不需要知道「Mamba-3用了选择性状态空间模型替代注意力机制」。\n\n"
+
+        "基于以下入选内容，生成一份日报。\n\n"
+
+        "## 内容分类\n"
+        "先把内容分成两组：\n"
+        "🔵 战略与商业：公司战略动作、市场/竞争格局、投资人判断、政策监管、商业模式\n"
+        "🟢 技术动态：新模型/架构、开源项目更新、Benchmark突破、技术路线之争\n"
+        "如果同时有技术和商业维度，按对读者的核心价值归类。\n\n"
+
+        "## 日报结构\n\n"
+        "### Part 1: 今日要点（3-5条）\n"
+        "只从🔵战略与商业中提炼。每条一句话写清楚「发生了什么+为什么重要」。\n"
+        "格式：- [来源] 增量描述——战略含义\n\n"
+
+        "### Part 2: 🔵 战略与商业（逐条）\n"
+        "每条：标题+来源+链接，2-3句增量摘要：\n"
+        "第一句：发生了什么（必须有具体信息：人名、公司、数据、时间）\n"
+        "第二句：为什么重要（对竞争格局/市场/赛道意味着什么）\n\n"
+
+        "### Part 3: 🟢 技术动态（逐条）\n"
+        "每条：标题+来源+链接，1-2句增量摘要：\n"
+        "第一句：是什么（产品名+一句话说它做什么）\n"
+        "第二句：为什么值得关注（用商业语言翻译技术意义，不写架构/算法细节）\n\n"
+
+        "### Part 4: 趋势观察（可选）\n"
+        "如果多条内容指向同一方向，2-3句话点出来。没有就跳过。\n\n"
+
+        f"## 入选内容\n\n{items_text}"
     )
 
 

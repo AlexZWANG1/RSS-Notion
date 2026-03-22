@@ -139,7 +139,7 @@ class XiaohongshuSource(BaseSource):
         all_items: list[SourceItem] = []
         seen_ids: set[str] = set()
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             # Initialize MCP session
             try:
                 ok = await self._init_session(client)
