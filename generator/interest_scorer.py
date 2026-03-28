@@ -70,16 +70,33 @@ class UserFeedback:
 
 
 # ---------------------------------------------------------------------------
-# OpenAI client (same pattern as summarizer.py)
+# OpenAI client
 # ---------------------------------------------------------------------------
 
 def _get_client() -> AsyncOpenAI:
-    """Create an AsyncOpenAI client, respecting OPENAI_BASE_URL for local proxies."""
-    return AsyncOpenAI(
+    """Create an AsyncOpenAI client with Langfuse observability if configured."""
+    client = AsyncOpenAI(
         api_key=os.environ.get("OPENAI_API_KEY", ""),
         base_url=os.environ.get("OPENAI_BASE_URL"),
-        timeout=60.0,
+        timeout=300.0,
     )
+
+    # Wrap with Langfuse if configured
+    if os.environ.get("LANGFUSE_SECRET_KEY"):
+        try:
+            from langfuse.openai import AsyncOpenAI as LangfuseAsyncOpenAI
+            client = LangfuseAsyncOpenAI(
+                api_key=os.environ.get("OPENAI_API_KEY", ""),
+                base_url=os.environ.get("OPENAI_BASE_URL"),
+                timeout=300.0,
+            )
+            logger.info("Langfuse observability enabled")
+        except ImportError:
+            logger.debug("langfuse not installed, skipping observability")
+        except Exception as e:
+            logger.warning(f"Langfuse init failed: {e}")
+
+    return client
 
 
 async def _call_with_retry(
@@ -99,7 +116,7 @@ async def _call_with_retry(
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
-                "timeout": 60.0,
+                "timeout": 300.0,
             }
             if response_format is not None:
                 kwargs["response_format"] = response_format
@@ -202,19 +219,34 @@ def _fetch_config_page(notion, page_id: str) -> dict[str, str]:
 
 def _fetch_research_titles(notion, database_id: str) -> list[str]:
     """Query the research database for existing topic titles (synchronous)."""
+    import httpx
+
     titles: list[str] = []
+    token = os.environ.get("NOTION_TOKEN", "")
+    if not token:
+        return titles
+
     try:
         cursor = None
         while True:
-            kwargs: dict = {
-                "database_id": database_id,
-                "page_size": 100,
-            }
+            body: dict = {"page_size": 100}
             if cursor:
-                kwargs["start_cursor"] = cursor
+                body["start_cursor"] = cursor
 
-            resp = notion.databases.query(**kwargs)
-            for page in resp.get("results", []):
+            resp = httpx.post(
+                f"https://api.notion.com/v1/databases/{database_id}/query",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=20.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            for page in data.get("results", []):
                 props = page.get("properties", {})
                 for key in ("Name", "名称", "title", "Title"):
                     title_prop = props.get(key)
@@ -224,9 +256,9 @@ def _fetch_research_titles(notion, database_id: str) -> list[str]:
                             titles.append(text)
                         break
 
-            if not resp.get("has_more"):
+            if not data.get("has_more"):
                 break
-            cursor = resp.get("next_cursor")
+            cursor = data.get("next_cursor")
 
     except Exception as exc:
         logger.warning("Failed to fetch research database titles: %s", exc)
@@ -234,74 +266,74 @@ def _fetch_research_titles(notion, database_id: str) -> list[str]:
     return titles
 
 
-def _fetch_recent_feedback(notion, database_id: str, days: int = 7) -> UserFeedback:
-    """Fetch recent user behavior from Notion inbox/archive for feedback loop."""
-    from datetime import date, timedelta
+# ---------------------------------------------------------------------------
+# Web Clipper integration
+# ---------------------------------------------------------------------------
+
+def _parse_clipper_results(results: list) -> str:
+    """Parse Notion query results from Web Clipper into text for prompt."""
+    if not results:
+        return ""
+    lines = []
+    for page in results:
+        props = page.get("properties", {})
+        title_arr = props.get("标题", {}).get("title", [])
+        title = title_arr[0]["plain_text"] if title_arr else "Untitled"
+        url = props.get("userDefined:URL", {}).get("url", "")
+        tags = [t["name"] for t in props.get("标签", {}).get("multi_select", [])]
+        tag_str = ", ".join(tags) if tags else ""
+        date_str = props.get("摘取时间", {}).get("created_time", "")[:10]
+
+        line = f"- {title}"
+        if tag_str:
+            line += f" [{tag_str}]"
+        if date_str:
+            line += f" ({date_str})"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+async def load_clipper_items(config: dict) -> str:
+    """Query Web Clipper database for recent 14 days of clippings. Returns formatted text."""
     import httpx
 
-    feedback = UserFeedback()
+    db_id = (config or {}).get("notion", {}).get("clipper_database_id", "")
+    if not db_id:
+        logger.warning("No clipper_database_id in config, skipping Web Clipper")
+        return ""
+
     token = os.environ.get("NOTION_TOKEN", "")
     if not token:
-        return feedback
-
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
+        return ""
 
     try:
-        # Query recent pages with 收录时间 in last N days
-        resp = httpx.post(
-            f"https://api.notion.com/v1/databases/{database_id}/query",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Notion-Version": "2022-06-28",
-                "Content-Type": "application/json",
-            },
-            json={
-                "filter": {
-                    "property": "收录时间",
-                    "date": {"on_or_after": cutoff},
+        from datetime import date, timedelta
+        cutoff = (date.today() - timedelta(days=14)).strftime("%Y-%m-%dT00:00:00Z")
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: httpx.post(
+                f"https://api.notion.com/v1/databases/{db_id}/query",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json",
                 },
-                "page_size": 100,
-            },
-            timeout=20.0,
+                json={
+                    "filter": {"property": "摘取时间", "created_time": {"on_or_after": cutoff}},
+                    "sorts": [{"property": "摘取时间", "direction": "descending"}],
+                },
+                timeout=20.0,
+            )
         )
-        resp.raise_for_status()
-
-        for page in resp.json().get("results", []):
-            props = page.get("properties", {})
-
-            # Extract title
-            title_parts = props.get("名称", {}).get("title", [])
-            title = "".join(t.get("plain_text", "") for t in title_parts)
-            # Strip [Source] prefix for cleaner matching
-            import re
-            title = re.sub(r"^\[[^\]]+\]\s*", "", title)
-
-            if not title or title.startswith("[运行报告]"):
-                continue
-
-            # Check 选择 (收藏/不收藏)
-            choice_sel = props.get("选择", {}).get("select")
-            choice = choice_sel["name"] if choice_sel else ""
-
-            # Check 待深度阅读
-            deep_read = props.get("待深度阅读", {}).get("checkbox", False)
-
-            if choice == "收藏":
-                feedback.favorited.append(title)
-            elif choice == "不收藏":
-                feedback.ignored.append(title)
-
-            if deep_read:
-                feedback.deep_read.append(title)
-
-    except Exception as exc:
-        logger.warning("Failed to fetch user feedback: %s", exc)
-
-    logger.info(
-        "Loaded feedback: %d favorited, %d ignored, %d deep-read",
-        len(feedback.favorited), len(feedback.ignored), len(feedback.deep_read),
-    )
-    return feedback
+        results = response.json().get("results", [])
+        text = _parse_clipper_results(results)
+        if text:
+            logger.info(f"Loaded {len(results)} Web Clipper items")
+        return text
+    except Exception as e:
+        logger.warning(f"Failed to query Web Clipper: {e}")
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -383,144 +415,183 @@ def _pre_filter(items: list[SourceItem]) -> list[SourceItem]:
     return result
 
 
-def _build_scoring_prompt(items, interests, feedback=None):
-    entries = []
+def _build_scoring_prompt(items: list, clipper_text: str, interests_text: str, source_stats: str = "") -> tuple[str, str]:
+    """Build system + user prompt for tiered scoring.
+
+    Returns (system_prompt, user_prompt) tuple.
+    """
+    system_prompt = """你是一位信息编辑部主编，负责为用户从海量信息中筛选出最有价值的内容。你需要完成三件事：筛选分层、撰写日报摘要、撰写编辑反思日志。
+
+## 任务一：筛选分层
+1. 先阅读用户近期主动收藏的内容，推断其兴趣方向和偏好
+2. 对待筛选文章进行事件聚类：多篇报道同一事件的合并为一个事件，选择最佳来源
+3. 按三个层级筛选输出
+
+### 分层标准
+- 📰 headline（2-3 条）：改变行业格局的重大事件，或 3+ 来源报道的多源热点。给出 200-300 字深度分析。
+- 🔍 noteworthy（4-6 条）：有信息增量，值得花 2 分钟了解。给出 80-100 字摘要 + 一句话洞察。
+- ⚡ glance（8-12 条）：知道有这事就行。一句话概括。确保覆盖各来源分类。
+
+### 来源分类（channel）
+每个 related_source 必须标注 channel，只能从以下选项中选：
+- "一手/官方" — 官方发布、一手消息（OpenAI、Google、Anthropic、DeepMind、Microsoft Research、Apple ML 等官方博客）
+- "深度研究" — 深度分析、研究报告、独立思考（Ars Technica、WIRED、MIT Tech Review、36氪、量子位、InfoQ、Simon Willison、Semafor 等）
+- "长内容/播客" — 播客、长视频、长文（No Priors、All-In、Lex Fridman、Dwarkesh Patel、Fireship、Two Minute Papers 等 YouTube 频道，以及 Stratechery、Latent.Space 等长文）
+- "社交/社区/Twitter" — Twitter/X、Reddit、社区讨论
+- "开源/技术/论文" — GitHub 项目、arXiv 论文、技术文章
+
+### 筛选原则
+- 信息增量原则：「读完这条，会改变你对 AI 领域某件事的认知吗？」
+- 不要只推与收藏相似的内容 — 保留 20-30% 的意外发现空间
+- 事件去重：同一事件只保留最佳来源（最详细/最权威）
+- **来源多样性**：最终精选结果中，5 个 channel 分类每个至少出现 1 次。如果某个分类确实没有值得入选的内容，在 run_report 中说明原因。特别注意不要忽略 YouTube/播客（长内容/播客）和官方博客（一手/官方）的内容。
+
+## 任务二：日报摘要
+写一段 50-100 字的今日总结，概括今天信息流的主线和关键信号。
+
+## 任务三：运行报告
+根据你收到的全量文章和数据源统计信息，撰写一份完整的系统运行报告。报告需要包含以下部分：
+
+1. **处理概览**：一句话总结今天的处理情况（抓取总数、精选总数、通过率）
+2. **数据源明细表**：逐个列出每个数据源的名称、抓取条数、耗时、状态，以及该源下的所有文章标题（每篇一行）。格式示例：
+   【Folo】60条 | 2765ms | ✅
+     · 文章标题1
+     · 文章标题2
+3. **筛选决策说明**：为什么选了这些、淘汰了哪些、有哪些边界案例
+4. **事件聚类说明**：哪些文章被合并了、为什么选择某个作为最佳来源
+5. **信号与趋势**：从今天全量信息中发现的趋势、异常、值得持续关注的信号
+6. **自我反思**：这次筛选可能漏掉了什么？信息源有什么偏差？下次可以改进什么？
+
+## 输出格式
+严格输出 JSON，不要有其他内容：
+{
+  "headline": [{"event_title": "...", "source_count": N, "best_source_url": "...", "best_source_name": "...", "analysis": "200-300字", "related_sources": [{"title": "原文标题", "url": "...", "source_name": "来源名", "channel": "来源分类", "one_liner": "这篇文章的一句话摘要"}]}],
+  "noteworthy": [{"event_title": "...", "source_count": N, "best_source_url": "...", "best_source_name": "...", "summary": "80-100字", "insight": "一句话", "related_sources": [{"title": "原文标题", "url": "...", "source_name": "来源名", "channel": "来源分类", "one_liner": "这篇文章的一句话摘要"}]}],
+  "glance": [{"title": "原文标题", "url": "...", "source_name": "来源名", "channel": "来源分类", "one_liner": "一句话摘要"}],
+  "daily_summary": "50-100字今日总结",
+  "run_report": "完整运行报告（包含上述6个部分，1000-1500字，用 Markdown 格式）",
+  "events_total": N,
+  "selected_total": N
+}
+
+注意：
+- related_sources 必须列出该事件涉及的所有原始文章（标题、URL、来源名、channel），不要省略
+- glance 也要保留原文标题、来源名和 channel
+- channel 必须严格使用上面 5 个选项之一
+- run_report 是完整的运行日志，要写得详细，这是给编辑团队内部审阅的，必须包含数据源明细表（每个源的每篇文章标题都要列出）"""
+
+    # User prompt
+    parts = []
+    if clipper_text:
+        parts.append(f"## 用户近期主动收藏（据此推断兴趣方向）\n{clipper_text}")
+    elif interests_text:
+        parts.append(f"## 用户兴趣描述\n{interests_text}")
+
+    if source_stats:
+        parts.append(f"\n## 数据源抓取统计（用于运行报告）\n{source_stats}")
+
+    parts.append(f"\n## 待筛选文章（共 {len(items)} 篇）\n")
+
+    # Token safety valve: estimate total size, downgrade if too large
+    max_chars_per_item = 800
+    estimated_chars = sum(len((item.description or "")[:max_chars_per_item]) for item in items)
+    estimated_tokens = int(estimated_chars * 1.7)
+    if estimated_tokens > 300_000:
+        max_chars_per_item = 500
+        logger.warning(f"Token budget tight (~{estimated_tokens}), reducing to {max_chars_per_item} chars/item")
+
     for i, item in enumerate(items):
-        entries.append(
-            f"[{i}] {item.title}\n"
-            f"    source: {item.source_name}\n"
-            f"    desc: {item.description[:400]}\n"
-            f"    url: {item.url}"
-        )
-    items_text = "\n\n".join(entries)
-    topics_text = ", ".join(interests.topics)
+        content = (item.description or "")[:max_chars_per_item]
+        parts.append(f"### [{i+1}] {item.title}\n来源: {item.source_name} | URL: {item.url}\n{content}\n")
 
-    designated = ""
-    if interests.designated_topic:
-        designated = f"\n⚡ 今日指定关注：{interests.designated_topic}（相关内容强烈倾向入选）\n"
-
-    feedback_section = ""
-    if feedback and (feedback.favorited or feedback.ignored):
-        lines = []
-        for t in feedback.favorited[:10]:
-            lines.append(f"  ✅ {t}")
-        for t in feedback.ignored[:10]:
-            lines.append(f"  ❌ {t}")
-        feedback_section = "\n## 读者最近的行为\n" + "\n".join(lines) + "\n先想想这位读者的口味，再往下做筛选。\n"
-
-    return (
-        f"你是一位信息策展人，服务于一位关注AI产业的{interests.perspective}。\n\n"
-        f"## 读者\n关注：{topics_text}\n{designated}{feedback_section}\n"
-        f"## 任务\n\n"
-        f"你面前有 {len(items)} 条候选内容。\n\n"
-        "1. 找出讲同一件事的重复报道，标同一个 event_cluster，只 include 信息量最大的那条\n"
-        "2. 从去重后的内容中选 10-15 条值得读者时间的。宁缺毋滥\n"
-        "3. 入选的按重要性从高到低排列\n\n"
-        "好内容 = 有读者昨天不知道的事实/数据/判断 + 会影响对某个公司/赛道/技术的看法\n"
-        "不选 = 标题说完了全部信息 / 二手转述无新观点 / 教程how-to / 跟科技无关\n\n"
-        "## 输出JSON\n\n"
-        '返回 {"items": [...]} 数组。\n\n'
-        "入选的每条：\n"
-        "{\n"
-        '  "index": 0,\n'
-        '  "include": true,\n'
-        '  "event_cluster": "事件名或空字符串",\n'
-        '  "channel": "一手/深度研究 | 长内容 | 社交/社区 | 开源/论文",\n'
-        '  "what_happened": "中文30-50字。谁做了什么，关键数字",\n'
-        '  "why_it_matters": "中文30-80字。这改变了什么判断、打破了什么预期、确认了什么趋势",\n'
-        '  "reason": "一句话为什么选"\n'
-        "}\n\n"
-        "未入选的只要：\n"
-        '{ "index": 5, "include": false, "reason": "一句话" }\n\n'
-        f"## 候选（{len(items)}条）\n\n{items_text}"
-    )
+    user_prompt = "\n".join(parts)
+    return system_prompt, user_prompt
 
 
-def _fallback_scored_item(item: SourceItem) -> ScoredItem:
-    """Create a minimal ScoredItem when LLM scoring fails."""
-    return ScoredItem(original=item, include=False, importance="低")
-
-
-async def load_user_feedback(config: dict | None = None) -> UserFeedback:
-    """Load recent user behavior from Notion for feedback-driven curation."""
-    if not os.environ.get("NOTION_TOKEN"):
-        return UserFeedback()
-
-    from delivery.notion_writer import DATABASE_ID
-    notion = _get_notion_client()
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, _fetch_recent_feedback, notion, DATABASE_ID, 7
-    )
-
-
-def _parse_scoring_response(content, items):
+def _parse_tiered_response(raw: str) -> dict | None:
+    """Parse LLM JSON response into tiered structure. Returns None on failure."""
     try:
-        data = json.loads(content)
-        llm_items = data.get("items", [])
-    except (json.JSONDecodeError, TypeError):
-        return [_fallback_scored_item(item) for item in items]
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
 
-    llm_map = {int(e["index"]): e for e in llm_items if "index" in e}
-    results = []
-    for i, src in enumerate(items):
-        e = llm_map.get(i)
-        if not e:
-            results.append(_fallback_scored_item(src))
-            continue
-        inc = bool(e.get("include", False))
-        results.append(ScoredItem(
-            original=src,
-            include=inc,
-            channel=e.get("channel", "") if inc else "",
-            event_cluster=e.get("event_cluster", ""),
-            what_happened=e.get("what_happened", "") if inc else "",
-            why_it_matters=e.get("why_it_matters", "") if inc else "",
-            score_reason=e.get("reason", ""),
-        ))
-    return results
+        data = json.loads(text)
+
+        for key in ("headline", "noteworthy", "glance", "daily_summary", "run_report"):
+            if key not in data:
+                logger.warning(f"Missing key in LLM response: {key}")
+                # run_report is important but not blocking
+                if key != "run_report":
+                    return None
+                data["run_report"] = ""
+
+        return data
+    except (json.JSONDecodeError, Exception) as e:
+        logger.error(f"Failed to parse tiered response: {e}")
+        return None
 
 
 async def score_items(
     items: list[SourceItem],
-    interests: UserInterests,
-    model: str = "gpt-5.2",
-    max_retries: int = 2,
-    feedback: UserFeedback | None = None,
-) -> list[ScoredItem]:
-    """Curate source items via a single LLM call.
+    config: dict,
+    interests: "UserInterests | None" = None,
+    clipper_text: str = "",
+    source_stats: str = "",
+) -> dict | None:
+    """Score and tier items with single LLM call.
 
-    Pre-filters duplicates in Python, truncates to 150 items if needed,
-    then sends everything in one prompt.
+    Returns tiered dict with headline/noteworthy/glance/daily_summary,
+    or None on failure.
     """
     if not items:
-        return []
+        logger.warning("No items to score")
+        return None
 
-    # Python-level dedup
     items = _pre_filter(items)
 
-    # Truncate to top 150 by platform score if too many
-    if len(items) > 150:
+    if len(items) > 200:
         items.sort(key=lambda x: x.score or 0, reverse=True)
-        items = items[:150]
+        items = items[:200]
+
+    # Build interests text as fallback when no clipper data
+    interests_text = ""
+    if interests:
+        parts = []
+        if interests.perspective:
+            parts.append(f"视角: {interests.perspective}")
+        if interests.topics:
+            parts.append(f"关注话题: {', '.join(interests.topics)}")
+        if interests.keywords:
+            parts.append(f"关键词: {', '.join(interests.keywords)}")
+        interests_text = "\n".join(parts)
+
+    system_prompt, user_prompt = _build_scoring_prompt(items, clipper_text, interests_text, source_stats)
+
+    logger.info(f"Scoring {len(items)} items (clipper signal: {'yes' if clipper_text else 'no'})")
 
     client = _get_client()
-    prompt = _build_scoring_prompt(items, interests, feedback)
+    model = config.get("pipeline", {}).get("llm", {}).get("processing_model", "gpt-5.4-mini")
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
-    content = await _call_with_retry(
-        client=client,
-        messages=[{"role": "user", "content": prompt}],
-        model=model,
-        temperature=0.3,
-        max_retries=max_retries,
-        response_format={"type": "json_object"},
-    )
+    response = await _call_with_retry(client, messages, model, temperature=0.3, max_retries=2)
 
-    if content is not None:
-        return _parse_scoring_response(content, items)
-    else:
-        return [_fallback_scored_item(item) for item in items]
+    if not response:
+        logger.error("LLM scoring call failed")
+        return None
 
+    result = _parse_tiered_response(response)
+    if not result:
+        logger.warning("First parse failed, retrying LLM call")
+        response = await _call_with_retry(client, messages, model, temperature=0.2, max_retries=1)
+        if response:
+            result = _parse_tiered_response(response)
 
-def filter_items(scored, max_items=20):
-    return [s for s in scored if s.include][:max_items]
+    return result

@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 
 from sources.base import BaseSource
 from sources.models import SourceItem
+from sources.content_fetcher import fetch_content_batch
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,28 @@ class GitHubTrendingSource(BaseSource):
 
     async def _fetch(self) -> list[SourceItem]:
         items = await self._fetch_via_jina()
-        if items:
-            return items
-        logger.warning("[GitHub Trending] Jina Reader failed or empty; falling back to direct scrape")
-        return await self._fetch_via_bs4()
+        if not items:
+            logger.warning("[GitHub Trending] Jina Reader failed or empty; falling back to direct scrape")
+            items = await self._fetch_via_bs4()
+        items = await self._enrich_items(items)
+        return items
+
+    async def _enrich_items(self, items: list[SourceItem]) -> list[SourceItem]:
+        """Enrich repos with README excerpts via Jina Reader."""
+        urls_to_fetch = []
+        indices = []
+        for i, item in enumerate(items):
+            if item.url and "github.com" in item.url:
+                urls_to_fetch.append(item.url)
+                indices.append(i)
+
+        if urls_to_fetch:
+            bodies = await fetch_content_batch(urls_to_fetch, max_chars=500)
+            for idx, body in zip(indices, bodies):
+                if body and len(body) > len(items[idx].description or ""):
+                    items[idx].description = body
+
+        return items
 
     # ----- strategy 1: Jina Reader -----
 

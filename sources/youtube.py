@@ -48,7 +48,32 @@ class YouTubeSource(BaseSource):
                 items.extend(result)
 
         items.sort(key=lambda x: x.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-        return items[:self.max_items]
+        items = items[:self.max_items]
+
+        # Enrich with transcript excerpts for LLM filtering
+        await self._enrich_with_transcripts(items)
+        return items
+
+    async def _enrich_with_transcripts(self, items: list[SourceItem], max_chars: int = 800):
+        """Fetch transcript excerpts for YouTube videos to give LLM real content."""
+        from generator.deep_reader import fetch_transcript
+
+        sem = asyncio.Semaphore(3)  # avoid YouTube rate limiting
+
+        async def _get(item: SourceItem):
+            vid = item.extra.get("video_id", "")
+            if not vid:
+                return
+            try:
+                async with sem:
+                    text = await fetch_transcript(vid)
+                    if text and len(text) > 100:
+                        item.description = text[:max_chars]
+                        logger.debug(f"[YouTube] Got transcript for {vid}: {len(text)} chars")
+            except Exception as e:
+                logger.debug(f"[YouTube] Transcript failed for {vid}: {e}")
+
+        await asyncio.gather(*[_get(it) for it in items], return_exceptions=True)
 
     async def _fetch_channel(
         self, session: aiohttp.ClientSession, channel: dict
@@ -132,13 +157,17 @@ class YouTubeSource(BaseSource):
                 continue
             seen_urls.add(url)
 
+            # Extract video_id from URL
+            vid_match = re.search(r'[?&]v=([^&"]+)', url)
+            video_id = vid_match.group(1) if vid_match else ""
+
             items.append(
                 SourceItem(
                     title=title,
                     url=url,
                     source_name=channel_name,
                     description="",
-                    extra={"channel": channel_name},
+                    extra={"video_id": video_id, "channel": channel_name},
                 )
             )
 

@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Optional
 
+from sources.content_fetcher import fetch_content_batch
+
 import aiohttp
 
 from sources.base import BaseSource
@@ -44,20 +46,38 @@ class RedditSource(BaseSource):
         client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
         user_agent = os.environ.get("REDDIT_USER_AGENT", "rss-notion-bot/1.0")
 
+        items = []
         if client_id and client_secret:
             logger.info("Using PRAW for Reddit data")
-            return await self._fetch_with_praw(client_id, client_secret, user_agent)
+            items = await self._fetch_with_praw(client_id, client_secret, user_agent)
+        else:
+            logger.info("No Reddit credentials found — falling back to RSS feeds")
+            try:
+                items = await self._fetch_with_rss()
+            except Exception as exc:
+                logger.warning(f"RSS fallback failed: {exc}")
+            if not items:
+                logger.info("RSS fallback returned nothing — trying Jina Reader")
+                items = await self._fetch_with_jina()
 
-        logger.info("No Reddit credentials found — falling back to RSS feeds")
-        try:
-            items = await self._fetch_with_rss()
-            if items:
-                return items
-        except Exception as exc:
-            logger.warning(f"RSS fallback failed: {exc}")
+        return await self._enrich_items(items)
 
-        logger.info("RSS fallback returned nothing — trying Jina Reader")
-        return await self._fetch_with_jina()
+    async def _enrich_items(self, items: list[SourceItem]) -> list[SourceItem]:
+        """Enrich link posts (no selftext) with Jina Reader body text."""
+        urls_to_fetch = []
+        indices = []
+        for i, item in enumerate(items):
+            if item.url and len(item.description) < 100:
+                urls_to_fetch.append(item.url)
+                indices.append(i)
+
+        if urls_to_fetch:
+            bodies = await fetch_content_batch(urls_to_fetch)
+            for idx, body in zip(indices, bodies):
+                if body:
+                    items[idx].description = body
+
+        return items
 
     # ------------------------------------------------------------------
     # PRAW path (synchronous library, run in executor)

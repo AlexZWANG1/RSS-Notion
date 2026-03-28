@@ -12,7 +12,6 @@ from notion_client import Client
 logger = logging.getLogger(__name__)
 
 DATABASE_ID = "d1da0a02-bb0f-4dfd-a7d0-8cf918e6f23c"
-ARCHIVE_DATABASE_ID = "fa9724b4-aa43-48ad-8f43-0f902abd760f"
 
 # Maximum characters per Notion rich_text block (API limit is 2000).
 _MAX_BLOCK_LEN = 2000
@@ -186,13 +185,17 @@ async def write_scored_items_to_notion(items: list, today: str) -> int:
                 continue
 
             # Map LLM channel output to Notion select options (with colors)
+            # Map LLM channel to exact Notion select option names
+            # Notion DB options: 一手/官方(blue), 深度研究(purple), 长内容/播客(orange),
+            #   社交/社区/Twitter(green), 开源/技术/论文(gray), 系统(gray)
+            _VALID_CHANNELS = {"一手/官方", "深度研究", "长内容/播客", "社交/社区/Twitter", "开源/技术/论文", "系统"}
             _CHANNEL_MAP = {
+                # Legacy names → new names
                 "一手/深度研究": "一手/官方",
                 "长内容": "长内容/播客",
                 "社交/社区": "社交/社区/Twitter",
                 "开源/论文": "开源/技术/论文",
             }
-            _VALID_CHANNELS = set(_CHANNEL_MAP.values()) | {"深度研究", "系统"}
             ch = getattr(item, "channel", "") or ""
             ch = _CHANNEL_MAP.get(ch, ch)
             if ch not in _VALID_CHANNELS:
@@ -432,7 +435,279 @@ async def write_run_report_to_notion(summary: str, today: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Inbox Cleanup — archive starred, delete the rest after retention period
+# v2: Daily Report Page
+# ---------------------------------------------------------------------------
+
+def _build_daily_report_blocks(tiered: dict, total_fetched: int = 0) -> list[dict]:
+    """Build Notion blocks for the tiered daily report page."""
+    blocks: list[dict] = []
+
+    # Daily summary callout
+    summary = tiered.get("daily_summary", "")
+    if summary:
+        blocks.append({
+            "type": "callout",
+            "callout": {
+                "icon": {"type": "emoji", "emoji": "📡"},
+                "rich_text": [{"type": "text", "text": {"content": summary}}],
+            }
+        })
+
+    # --- Headline section ---
+    blocks.append({"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": "📰 头条"}}]}})
+
+    for item in tiered.get("headline", []):
+        blocks.append({"type": "heading_3", "heading_3": {"rich_text": [{"type": "text", "text": {"content": item.get("event_title", "")}}]}})
+        source_line = f"来源：{item.get('best_source_name', '')}"
+        if item.get("source_count", 0) > 1:
+            source_line += f" | 被 {item['source_count']} 个来源报道"
+        blocks.append({"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": source_line}, "annotations": {"bold": True}}]}})
+        analysis = item.get("analysis", "")
+        if analysis:
+            blocks.append(_text_block(analysis))
+        # Related sources with titles + one-liner
+        related = item.get("related_sources", [])
+        if related:
+            for src in related:
+                src_title = src.get("title", "")
+                src_url = src.get("url", "")
+                src_name = src.get("source_name", "")
+                one_liner = src.get("one_liner", "")
+                prefix = f"[{src_name}] " if src_name else ""
+                title_rt: dict[str, Any] = {"content": src_title}
+                if src_url:
+                    title_rt["link"] = {"url": src_url}
+                rich_text: list[dict[str, Any]] = []
+                if prefix:
+                    rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "gray"}})
+                rich_text.append({"type": "text", "text": title_rt, "annotations": {"bold": True}})
+                if one_liner:
+                    rich_text.append({"type": "text", "text": {"content": f" — {one_liner}"}})
+                blocks.append({"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": rich_text}})
+        elif item.get("best_source_url"):
+            blocks.append({"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": f"🔗 {item.get('best_source_name', '原文')}", "link": {"url": item["best_source_url"]}}}]}})
+        blocks.append({"type": "divider", "divider": {}})
+
+    # --- Noteworthy section ---
+    blocks.append({"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": "🔍 值得关注"}}]}})
+
+    for item in tiered.get("noteworthy", []):
+        blocks.append({"type": "heading_3", "heading_3": {"rich_text": [{"type": "text", "text": {"content": item.get("event_title", "")}}]}})
+        summary_text = item.get("summary", "")
+        if summary_text:
+            blocks.append(_text_block(summary_text))
+        insight = item.get("insight", "")
+        if insight:
+            blocks.append(_text_block(f"💡 {insight}"))
+        # Related sources with one-liners
+        related = item.get("related_sources", [])
+        if related:
+            for src in related:
+                src_title = src.get("title", "")
+                src_url = src.get("url", "")
+                src_name = src.get("source_name", "")
+                one_liner = src.get("one_liner", "")
+                prefix = f"[{src_name}] " if src_name else ""
+                title_rt: dict[str, Any] = {"content": src_title}
+                if src_url:
+                    title_rt["link"] = {"url": src_url}
+                rich_text: list[dict[str, Any]] = []
+                if prefix:
+                    rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "gray"}})
+                rich_text.append({"type": "text", "text": title_rt, "annotations": {"bold": True}})
+                if one_liner:
+                    rich_text.append({"type": "text", "text": {"content": f" — {one_liner}"}})
+                blocks.append({"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": rich_text}})
+        elif item.get("best_source_url"):
+            blocks.append({"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": f"🔗 {item.get('best_source_name', '原文')}", "link": {"url": item["best_source_url"]}}}]}})
+
+    blocks.append({"type": "divider", "divider": {}})
+
+    # --- Glance section ---
+    blocks.append({"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": "⚡ 速览"}}]}})
+
+    for item in tiered.get("glance", []):
+        src_name = item.get("source_name", "")
+        prefix = f"[{src_name}] " if src_name else ""
+        title = item.get("title", "")
+        one_liner = item.get("one_liner", "")
+        url = item.get("url", "")
+        rich_text: list[dict[str, Any]] = []
+        if prefix:
+            rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "gray"}})
+        title_rt: dict[str, Any] = {"content": title}
+        if url:
+            title_rt["link"] = {"url": url}
+        rich_text.append({"type": "text", "text": title_rt, "annotations": {"bold": True}})
+        if one_liner:
+            rich_text.append({"type": "text", "text": {"content": f" — {one_liner}"}})
+        blocks.append({"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": rich_text}})
+
+    blocks.append({"type": "divider", "divider": {}})
+
+    # --- Stats ---
+    events_total = tiered.get("events_total", 0)
+    selected_total = tiered.get("selected_total", 0)
+    stats = f"📊 来源统计：抓取 {total_fetched} 篇 → 聚合 {events_total} 事件 → 精选 {selected_total} 条"
+    blocks.append(_text_block(stats))
+
+    return blocks[:98]
+
+
+async def write_daily_report(tiered: dict, total_fetched: int = 0, parent_page_id: str = "") -> str | None:
+    """Create a daily report page in Notion. Returns page URL or None."""
+    notion = _get_notion_client()
+    if not notion:
+        return None
+
+    today = date.today().isoformat()
+    title = f"📰 AI Daily — {today}"
+
+    blocks = _build_daily_report_blocks(tiered, total_fetched)
+
+    try:
+        if parent_page_id:
+            parent = {"page_id": parent_page_id}
+            properties = {"title": {"title": [{"text": {"content": title}}]}}
+        else:
+            parent = {"database_id": DATABASE_ID}
+            properties = {"名称": {"title": [{"text": {"content": title}}]}}
+        loop = asyncio.get_running_loop()
+        page = await loop.run_in_executor(
+            None,
+            lambda: notion.pages.create(
+                parent=parent,
+                properties=properties,
+                children=blocks,
+            )
+        )
+        url = page.get("url", "")
+        logger.info(f"Daily report created: {url}")
+        return url
+    except Exception as e:
+        logger.error(f"Failed to create daily report: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# v2: Web Clipper Sync
+# ---------------------------------------------------------------------------
+
+def _build_clipper_summary_prompt(title: str, url: str, body: str) -> str:
+    """Build prompt for summarizing a Web Clipper item."""
+    return f"""为以下文章生成摘要和洞察。
+
+标题：{title}
+URL：{url}
+正文：{body[:2000]}
+
+输出 JSON 格式：
+{{"summary": "100-200字摘要", "insight": "一句话核心洞察", "importance": "高/中/低"}}"""
+
+
+async def sync_clipper_items(config: dict) -> dict:
+    """Process new Web Clipper items: fetch content, generate summaries, update Notion."""
+    import json as _json
+    from sources.content_fetcher import fetch_content
+    from generator.interest_scorer import _get_client, _call_with_retry
+
+    db_id = (config or {}).get("notion", {}).get("clipper_database_id", "")
+    if not db_id:
+        return {"processed": 0, "errors": []}
+
+    notion = _get_notion_client()
+    if not notion:
+        return {"processed": 0, "errors": []}
+
+    try:
+        loop = asyncio.get_running_loop()
+        token = os.environ.get("NOTION_TOKEN", "")
+        response = await loop.run_in_executor(
+            None,
+            lambda: httpx.post(
+                f"https://api.notion.com/v1/databases/{db_id}/query",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json",
+                },
+                json={"filter": {"property": "已处理", "checkbox": {"equals": False}}},
+                timeout=20.0,
+            )
+        )
+        pages = response.json().get("results", [])
+    except Exception as e:
+        logger.error(f"Failed to query Web Clipper: {e}")
+        return {"processed": 0, "errors": [str(e)]}
+
+    if not pages:
+        logger.info("No new Web Clipper items to process")
+        return {"processed": 0, "errors": []}
+
+    logger.info(f"Processing {len(pages)} new Web Clipper items")
+
+    processed = 0
+    errors = []
+    model = (config or {}).get("pipeline", {}).get("llm", {}).get("processing_model", "gpt-5.4-mini")
+
+    for page in pages:
+        try:
+            props = page.get("properties", {})
+            title_arr = props.get("标题", {}).get("title", [])
+            title = title_arr[0]["plain_text"] if title_arr else "Untitled"
+            url = props.get("userDefined:URL", {}).get("url", "")
+
+            body = ""
+            if url:
+                body = await fetch_content(url)
+
+            prompt = _build_clipper_summary_prompt(title, url, body)
+            client = _get_client()
+            messages = [
+                {"role": "system", "content": "你是一个文章摘要助手。严格输出JSON。"},
+                {"role": "user", "content": prompt},
+            ]
+            response_text = await _call_with_retry(client, messages, model, temperature=0.3, max_retries=2)
+
+            if response_text:
+                try:
+                    text = response_text.strip().strip("`")
+                    if text.startswith("json"):
+                        text = text[4:].strip()
+                    data = _json.loads(text)
+
+                    update_props: dict[str, Any] = {}
+                    if data.get("summary"):
+                        update_props["摘要"] = {"rich_text": [{"text": {"content": data["summary"][:2000]}}]}
+                    if data.get("insight"):
+                        update_props["洞察"] = {"rich_text": [{"text": {"content": data["insight"][:2000]}}]}
+                    if data.get("importance"):
+                        update_props["重要性"] = {"select": {"name": data["importance"]}}
+                    update_props["来源类型"] = {"select": {"name": "手动剪藏"}}
+                    update_props["已处理"] = {"checkbox": True}
+
+                    await loop.run_in_executor(
+                        None,
+                        lambda pid=page["id"], p=update_props: notion.pages.update(page_id=pid, properties=p)
+                    )
+                    processed += 1
+                    logger.info(f"Clipper item processed: {title}")
+                except _json.JSONDecodeError:
+                    logger.warning(f"Failed to parse clipper summary for: {title}")
+                    errors.append(f"JSON parse error: {title}")
+            else:
+                errors.append(f"LLM call failed: {title}")
+
+        except Exception as e:
+            errors.append(f"{title}: {e}")
+            logger.warning(f"Clipper sync error for page {page.get('id')}: {e}")
+
+    logger.info(f"Clipper sync done: processed {processed}, errors {len(errors)}")
+    return {"processed": processed, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# v2: Simplified Inbox Cleanup — delete all after retention period
 # ---------------------------------------------------------------------------
 
 def _query_expired_pages(token: str, retention_days: int = 3) -> list[dict]:
@@ -459,134 +734,257 @@ def _query_expired_pages(token: str, retention_days: int = 3) -> list[dict]:
     return resp.json().get("results", [])
 
 
-def _extract_page_fields(page: dict) -> dict:
-    """Extract key fields from a Notion page for archiving."""
-    props = page.get("properties", {})
-
-    title_parts = props.get("名称", {}).get("title", [])
-    title = "".join(t.get("plain_text", "") for t in title_parts)
-
-    url = props.get("原文链接", {}).get("url", "")
-
-    media_parts = props.get("媒体来源", {}).get("rich_text", [])
-    media = "".join(t.get("plain_text", "") for t in media_parts)
-
-    source_sel = props.get("来源", {}).get("select")
-    source = source_sel["name"] if source_sel else ""
-
-    importance_sel = props.get("重要性", {}).get("select")
-    importance = importance_sel["name"] if importance_sel else ""
-
-    topic_opts = props.get("话题", {}).get("multi_select", [])
-    topics = [t["name"] for t in topic_opts]
-
-    choice_sel = props.get("选择", {}).get("select")
-    choice = choice_sel["name"] if choice_sel else ""
-
-    date_prop = props.get("收录时间", {}).get("date")
-    date_start = date_prop["start"] if date_prop else ""
-
-    return {
-        "page_id": page["id"],
-        "title": title,
-        "url": url,
-        "media": media,
-        "source": source,
-        "importance": importance,
-        "topics": topics,
-        "choice": choice,
-        "date_start": date_start,
-    }
-
-
-def _archive_to_database(notion: Client, fields: dict) -> None:
-    """Copy a page's key properties into the archive database."""
-    # Map inbox 来源 values to archive 来源 values
-    _ARCHIVE_SOURCE_MAP = {
-        "科技媒体": "AI生成", "AI技术社区": "AI生成", "论文与评审": "AI生成",
-        "社交/社区/视频": "AI生成", "官方一手": "AI生成", "个人分析师": "AI生成",
-        "数据/榜单/基准": "AI生成", "投资机构报告": "AI生成", "独立研究机构": "AI生成",
-        "系统": "系统", "手动": "手动",
-    }
-    archive_source = _ARCHIVE_SOURCE_MAP.get(fields["source"], "AI生成")
-
-    # Map importance (same values in both DBs)
-    _VALID_IMPORTANCE = {"高", "中", "低"}
-    importance = fields["importance"] if fields["importance"] in _VALID_IMPORTANCE else "中"
-
-    props: dict[str, Any] = {
-        "名称": {"title": [{"text": {"content": fields["title"]}}]},
-        "来源": {"select": {"name": archive_source}},
-        "状态": {"select": {"name": "已归档"}},
-        "重要性": {"select": {"name": importance}},
-    }
-    if fields["url"]:
-        props["原文链接"] = {"url": fields["url"]}
-    if fields["media"]:
-        props["媒体来源"] = {"rich_text": [{"text": {"content": fields["media"][:2000]}}]}
-    if fields["date_start"]:
-        props["收录时间"] = {"date": {"start": fields["date_start"]}}
-    if fields["topics"]:
-        props["话题"] = {"multi_select": [{"name": t} for t in fields["topics"]]}
-    if fields["choice"]:
-        _VALID_CHOICE = {"收藏", "不收藏"}
-        if fields["choice"] in _VALID_CHOICE:
-            props["选择"] = {"select": {"name": fields["choice"]}}
-
-    notion.pages.create(parent={"database_id": ARCHIVE_DATABASE_ID}, properties=props)
-
-
 async def cleanup_inbox(retention_days: int = 3) -> dict:
-    """Clean up inbox: archive starred items, delete the rest.
-
-    Args:
-        retention_days: Keep items newer than this many days.
-
-    Returns:
-        Stats dict with archived/deleted/skipped counts.
-    """
+    """Delete all inbox items older than N days. No archiving."""
     token = os.environ.get("NOTION_TOKEN", "")
     if not token:
         logger.warning("NOTION_TOKEN not set – skipping cleanup.")
-        return {"archived": 0, "deleted": 0, "skipped": 0}
-
-    notion = Client(auth=token)
-    stats = {"archived": 0, "deleted": 0, "skipped": 0}
+        return {"deleted": 0, "errors": []}
 
     try:
-        pages = await _run_sync(_query_expired_pages, token, retention_days)
-    except Exception as exc:
-        logger.error("Failed to query expired pages: %s", exc)
-        return stats
+        loop = asyncio.get_running_loop()
+        expired = await loop.run_in_executor(
+            None, lambda: _query_expired_pages(token, retention_days)
+        )
+        logger.info(f"Found {len(expired)} expired inbox items (>{retention_days} days)")
 
-    if not pages:
-        logger.info("Inbox cleanup: nothing to clean (all within %d days)", retention_days)
-        return stats
+        notion = _get_notion_client()
+        deleted = 0
+        errors = []
+        for page in expired:
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda pid=page["id"]: notion.pages.update(page_id=pid, archived=True)
+                )
+                deleted += 1
+            except Exception as e:
+                errors.append(str(e))
 
-    logger.info("Inbox cleanup: found %d expired pages", len(pages))
+        logger.info(f"Cleanup done: deleted {deleted}, errors {len(errors)}")
+        return {"deleted": deleted, "errors": errors}
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        return {"deleted": 0, "errors": [str(e)]}
 
-    for page in pages:
-        fields = _extract_page_fields(page)
-        page_id = fields["page_id"]
 
-        try:
-            if fields["choice"] == "收藏":
-                # Archive: copy to archive DB, then soft-delete from inbox
-                await _run_sync(_archive_to_database, notion, fields)
-                await _run_sync(notion.pages.update, page_id=page_id, archived=True)
-                stats["archived"] += 1
-                logger.info("  📦 Archived: %s", fields["title"])
-            else:
-                # Not starred: just soft-delete
-                await _run_sync(notion.pages.update, page_id=page_id, archived=True)
-                stats["deleted"] += 1
-                logger.info("  🗑️ Deleted: %s", fields["title"])
-        except Exception as exc:
-            logger.warning("  Failed to process %s: %s", fields["title"], exc)
-            stats["skipped"] += 1
+# ---------------------------------------------------------------------------
+# v2: Markdown-based daily report (Call 2 output)
+# ---------------------------------------------------------------------------
 
-    logger.info(
-        "Inbox cleanup done: %d archived, %d deleted, %d skipped",
-        stats["archived"], stats["deleted"], stats["skipped"],
-    )
-    return stats
+async def write_daily_report_markdown(markdown: str, today: str) -> str | None:
+    """Create a daily report page from LLM-generated markdown. Returns page URL or None."""
+    notion = _get_notion_client()
+    if not notion:
+        return None
+
+    title = f"📰 AI Daily — {today}"
+
+    # Convert markdown to Notion blocks by splitting into paragraphs
+    blocks: list[dict] = []
+    for line in markdown.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#### "):
+            blocks.append({"type": "heading_3", "heading_3": {"rich_text": _parse_inline_markdown(line[5:])}})
+        elif line.startswith("### "):
+            blocks.append({"type": "heading_2", "heading_2": {"rich_text": _parse_inline_markdown(line[4:])}})
+        elif line.startswith("## "):
+            blocks.append({"type": "heading_1", "heading_1": {"rich_text": _parse_inline_markdown(line[3:])}})
+        elif line == "---":
+            blocks.append({"type": "divider", "divider": {}})
+        elif line.startswith("- "):
+            blocks.append({"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _parse_inline_markdown(line[2:])}})
+        elif line.startswith("💡"):
+            content = line.replace("💡", "", 1).strip()
+            blocks.append({"type": "callout", "callout": {"icon": {"type": "emoji", "emoji": "💡"}, "rich_text": _parse_inline_markdown(content)}})
+        elif line[0] in "📊📡🔥⚡":
+            emoji = line[0]
+            content = line.replace(emoji, "", 1).strip()
+            blocks.append({"type": "callout", "callout": {"icon": {"type": "emoji", "emoji": emoji}, "rich_text": _parse_inline_markdown(content)}})
+        else:
+            blocks.append({"type": "paragraph", "paragraph": {"rich_text": _parse_inline_markdown(line)}})
+
+    blocks = blocks[:98]
+
+    try:
+        loop = asyncio.get_running_loop()
+        page = await loop.run_in_executor(
+            None,
+            lambda: notion.pages.create(
+                parent={"database_id": DATABASE_ID},
+                properties={
+                    "名称": {"title": [{"text": {"content": title}}]},
+                    "来源": {"select": {"name": "系统"}},
+                    "重要性": {"select": {"name": "高"}},
+                    "收录时间": {"date": {"start": today}},
+                },
+                children=blocks,
+            )
+        )
+        url = page.get("url", "")
+        logger.info(f"Daily report (markdown) created: {url}")
+        return url
+    except Exception as e:
+        logger.error(f"Failed to create daily report: {e}")
+        return None
+
+
+def _parse_inline_markdown(text: str) -> list[dict]:
+    """Parse inline markdown (**bold**, [link](url)) into Notion rich_text."""
+    import re
+    rich_text: list[dict] = []
+    # Pattern: **bold** or [text](url)
+    pattern = re.compile(r'(\*\*(.+?)\*\*|\[([^\]]+)\]\(([^)]+)\))')
+    last_end = 0
+    for m in pattern.finditer(text):
+        # Add text before this match
+        if m.start() > last_end:
+            plain = text[last_end:m.start()]
+            if plain:
+                rich_text.append({"type": "text", "text": {"content": plain}})
+        if m.group(2):  # **bold**
+            rich_text.append({"type": "text", "text": {"content": m.group(2)}, "annotations": {"bold": True}})
+        elif m.group(3):  # [text](url)
+            rich_text.append({"type": "text", "text": {"content": m.group(3), "link": {"url": m.group(4)}}})
+        last_end = m.end()
+    # Remaining text
+    if last_end < len(text):
+        remaining = text[last_end:]
+        if remaining:
+            rich_text.append({"type": "text", "text": {"content": remaining}})
+    if not rich_text:
+        rich_text.append({"type": "text", "text": {"content": text}})
+    return rich_text
+
+
+async def update_hub_page(hub_page_id: str, report_markdown: str, report_url: str, today: str) -> bool:
+    """Update 信息流中心: blue callout link + red callout content."""
+    token = os.environ.get("NOTION_TOKEN", "")
+    if not token:
+        return False
+
+    try:
+        loop = asyncio.get_running_loop()
+
+        # Get existing blocks
+        resp = await loop.run_in_executor(
+            None,
+            lambda: httpx.get(
+                f"https://api.notion.com/v1/blocks/{hub_page_id}/children",
+                headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28"},
+                params={"page_size": 50},
+                timeout=20.0,
+            )
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Cannot read hub page: {resp.status_code}")
+            return False
+
+        blocks = resp.json().get("results", [])
+        updated = False
+
+        for block in blocks:
+            if block.get("type") != "callout":
+                continue
+            icon = block.get("callout", {}).get("icon", {}).get("emoji", "")
+
+            if icon == "📰":
+                # Blue callout — update report link
+                # Notion API can't set mention-page via rich_text patch,
+                # so we set a text with the URL
+                link_text = f"今日日报（{today}）"
+                await loop.run_in_executor(
+                    None,
+                    lambda bid=block["id"]: httpx.patch(
+                        f"https://api.notion.com/v1/blocks/{bid}",
+                        headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28", "Content-Type": "application/json"},
+                        json={"callout": {"rich_text": [
+                            {"type": "text", "text": {"content": "📰 ", "link": {"url": report_url}}, "annotations": {"bold": True}},
+                            {"type": "text", "text": {"content": link_text, "link": {"url": report_url}}, "annotations": {"bold": True}},
+                            {"type": "text", "text": {"content": " · 收件箱 · 配置 — 点击日报链接查看完整内容"}},
+                        ]}},
+                        timeout=20.0,
+                    )
+                )
+                logger.info("Updated hub blue callout link")
+                updated = True
+
+            elif icon == "📡":
+                # Red callout — replace content with latest daily report
+                # First delete all children of this callout
+                children_resp = await loop.run_in_executor(
+                    None,
+                    lambda bid=block["id"]: httpx.get(
+                        f"https://api.notion.com/v1/blocks/{bid}/children",
+                        headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28"},
+                        params={"page_size": 100},
+                        timeout=20.0,
+                    )
+                )
+                if children_resp.status_code == 200:
+                    for child in children_resp.json().get("results", []):
+                        await loop.run_in_executor(
+                            None,
+                            lambda cid=child["id"]: httpx.delete(
+                                f"https://api.notion.com/v1/blocks/{cid}",
+                                headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28"},
+                                timeout=20.0,
+                            )
+                        )
+
+                # Build new blocks from report markdown
+                new_blocks = []
+                for line in report_markdown.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("#### "):
+                        new_blocks.append({"type": "heading_3", "heading_3": {"rich_text": _parse_inline_markdown(line[5:])}})
+                    elif line.startswith("### "):
+                        new_blocks.append({"type": "heading_2", "heading_2": {"rich_text": _parse_inline_markdown(line[4:])}})
+                    elif line == "---":
+                        new_blocks.append({"type": "divider", "divider": {}})
+                    elif line.startswith("- "):
+                        new_blocks.append({"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _parse_inline_markdown(line[2:])}})
+                    elif line.startswith("💡"):
+                        content = line.replace("💡", "", 1).strip()
+                        new_blocks.append({"type": "callout", "callout": {"icon": {"type": "emoji", "emoji": "💡"}, "rich_text": _parse_inline_markdown(content)}})
+                    elif line[0] in "📊📡🔥⚡":
+                        emoji = line[0]
+                        content = line.replace(emoji, "", 1).strip()
+                        new_blocks.append({"type": "callout", "callout": {"icon": {"type": "emoji", "emoji": emoji}, "rich_text": _parse_inline_markdown(content)}})
+                    else:
+                        new_blocks.append({"type": "paragraph", "paragraph": {"rich_text": _parse_inline_markdown(line)}})
+
+                # Append new blocks in batches of 100
+                for i in range(0, min(len(new_blocks), 95), 100):
+                    batch = new_blocks[i:i+100]
+                    await loop.run_in_executor(
+                        None,
+                        lambda bid=block["id"], b=batch: httpx.patch(
+                            f"https://api.notion.com/v1/blocks/{bid}",
+                            headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28", "Content-Type": "application/json"},
+                            json={"callout": {"rich_text": [{"type": "text", "text": {"content": f"📰 AI Daily — {today}"}}]}},
+                            timeout=20.0,
+                        )
+                    )
+                    # Append children
+                    await loop.run_in_executor(
+                        None,
+                        lambda bid=block["id"], b=batch: httpx.patch(
+                            f"https://api.notion.com/v1/blocks/{bid}/children",
+                            headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28", "Content-Type": "application/json"},
+                            json={"children": b},
+                            timeout=30.0,
+                        )
+                    )
+
+                logger.info(f"Updated hub red callout with {len(new_blocks)} blocks")
+                updated = True
+
+        return updated
+    except Exception as e:
+        logger.warning(f"Failed to update hub page: {e}")
+        return False

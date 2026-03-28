@@ -9,6 +9,7 @@ import aiohttp
 
 from sources.base import BaseSource
 from sources.models import SourceItem
+from sources.content_fetcher import fetch_content_batch
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,28 @@ class HackerNewsSource(BaseSource):
 
             # 4. Sort by score descending
             items.sort(key=lambda x: x.score or 0, reverse=True)
-            return items
+
+        # 5. Enrich with article body text (outside session block)
+        items = await self._enrich_items(items)
+        return items
+
+    @staticmethod
+    async def _enrich_items(items: list[SourceItem]) -> list[SourceItem]:
+        """Enrich items that have URLs with Jina Reader body text."""
+        urls_to_fetch = []
+        indices = []
+        for i, item in enumerate(items):
+            if item.url and not item.url.startswith("https://news.ycombinator.com"):
+                urls_to_fetch.append(item.url)
+                indices.append(i)
+
+        if urls_to_fetch:
+            bodies = await fetch_content_batch(urls_to_fetch)
+            for idx, body in zip(indices, bodies):
+                if body:
+                    items[idx].description = body
+
+        return items
 
     @staticmethod
     async def _fetch_item(session: aiohttp.ClientSession, item_id: int) -> Optional[dict]:

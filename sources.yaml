@@ -2,19 +2,34 @@ rss:
   # sources.yaml 只放 Folo 里没有的源作为补充
   # Twitter/博客/播客 全部由 Folo 管理，不在这里重复
 
-  # ── 官方一手（Folo 可能没订阅的）──
+  # ── 官方一手 ──
   - { name: "OpenAI News", url: "https://openai.com/news/rss.xml", category: "官方一手" }
   - { name: "Google DeepMind", url: "https://deepmind.google/blog/rss.xml", category: "官方一手" }
   - { name: "Google Research", url: "https://blog.research.google/feeds/posts/default?alt=rss", category: "官方一手" }
   - { name: "Microsoft Research", url: "https://www.microsoft.com/en-us/research/feed/", category: "官方一手" }
   - { name: "HuggingFace Blog", url: "https://huggingface.co/blog/feed.xml", category: "AI技术社区" }
+  - { name: "Apple ML Research", url: "https://machinelearning.apple.com/rss.xml", category: "官方一手" }
 
   # ── 投资机构 ──
   - { name: "a16z Future", url: "https://future.a16z.com/feed/", category: "投资机构" }
   - { name: "Sequoia Capital", url: "https://www.sequoiacap.com/feed/", category: "投资机构" }
 
-  # ── 独立研究 ──
+  # ── 独立研究/深度分析 ──
   - { name: "Semianalysis", url: "https://semianalysis.com/feed/", category: "独立研究" }
+  - { name: "Simon Willison's Blog", url: "https://simonwillison.net/atom/everything/", category: "独立研究" }
+  - { name: "Lil'Log (Lilian Weng)", url: "https://lilianweng.github.io/index.xml", category: "独立研究" }
+  - { name: "Import AI (Jack Clark)", url: "https://importai.substack.com/feed", category: "独立研究" }
+  - { name: "Ahead of AI (Raschka)", url: "https://magazine.sebastianraschka.com/feed", category: "独立研究" }
+
+  # ── 中文媒体 ──
+  - { name: "36氪", url: "https://36kr.com/feed", category: "中文媒体" }
+  - { name: "量子位", url: "https://www.qbitai.com/feed", category: "中文媒体" }
+  - { name: "InfoQ 中文", url: "https://www.infoq.cn/feed", category: "中文媒体" }
+
+  # ── 英文媒体 ──
+  - { name: "Ars Technica AI", url: "https://arstechnica.com/ai/feed/", category: "英文媒体" }
+  - { name: "MIT Technology Review AI", url: "https://www.technologyreview.com/topic/artificial-intelligence/feed", category: "英文媒体" }
+  - { name: "Semafor", url: "https://www.semafor.com/rss.xml", category: "英文媒体" }
 
 # Tavily 暂时关闭（API 格式问题待修）
 search:

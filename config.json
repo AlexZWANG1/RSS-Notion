@@ -6,7 +6,9 @@
     "archive_database_id": "fa9724b4-aa43-48ad-8f43-0f902abd760f",
     "archive_data_source": "collection://296ab5f0-a9e7-431a-9097-ba07f24df0aa",
     "config_page_id": "32516831-83e6-8100-b28f-f60937b0d472",
-    "research_database_data_source": "collection://2fe16831-83e6-805c-a095-000bab8d1eca"
+    "research_database_data_source": "collection://2fe16831-83e6-805c-a095-000bab8d1eca",
+    "clipper_database_id": "148f50ee-e7b6-4cdd-9255-979f4d9e2855",
+    "hub_page_id": "3291683183e681b19caedbf21fe610d1"
   },
   "schedule": {
     "times": ["08:00", "18:00"],
@@ -20,7 +22,7 @@
   "pipeline": {
     "sources": {
       "folo": { "enabled": true, "max_items": 60 },
-      "rss": { "enabled": true, "max_items": 30, "max_age_days": 7 },
+      "rss": { "enabled": true, "max_items": 60, "max_age_days": 7 },
       "hackernews": { "enabled": true, "max_items": 15 },
       "arxiv": { "enabled": true, "categories": ["cs.AI", "cs.CL", "cs.LG"], "max_items": 10 },
       "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
@@ -55,8 +57,8 @@
       }
     },
     "llm": {
-      "summary_model": "gpt-5.4-mini",
-      "processing_model": "gpt-5.4-mini"
+      "summary_model": "gpt-5.4",
+      "processing_model": "gpt-5.4"
     },
     "pdf": {
       "template": "daily_report",
