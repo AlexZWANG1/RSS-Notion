@@ -29,7 +29,7 @@ from generator.pdf_builder import build_pdf
 from delivery.emailer import send_report_email
 from delivery.notion_writer import (
     write_scored_items_to_notion,
-    write_daily_report,
+    write_daily_report_v2,
     write_run_report_to_notion,
     cleanup_inbox,
     sync_clipper_items,
@@ -219,21 +219,30 @@ async def run_pipeline(
     if not skip_notion:
         logger.info("Phase 4: Writing to Notion...")
 
-        # 4a: Call 2 — LLM generates newsletter-quality daily report
-        logger.info("  4a: Generating daily report (Call 2)...")
-        report_markdown = await generate_daily_report(tiered, all_items, config)
+        # 4a: Call 2 — LLM generates structured JSON daily report
+        logger.info("  4a: Generating daily report v2 (structured JSON)...")
+        report_json = await generate_daily_report(tiered, all_items, config)
 
-        # Write daily report page to inbox database
-        from delivery.notion_writer import write_daily_report_markdown
-        report_url = await write_daily_report_markdown(report_markdown, today)
+        # Write daily report page with native Notion blocks
+        report_url = await write_daily_report_v2(
+            report_json, tiered, today, total_fetched=len(all_items)
+        )
         if report_url:
-            logger.info(f"  Daily report: {report_url}")
+            logger.info(f"  Daily report v2: {report_url}")
 
-        # Auto-update 信息流中心 page with latest report content
+        # Auto-update 信息流中心 page
         hub_page_id = config.get("notion", {}).get("hub_page_id", "")
-        if hub_page_id and report_markdown:
+        if hub_page_id:
+            source = report_json if report_json else tiered
+            # Strip any existing **bold** from one_liner to avoid nested bold
+            one_liner = source.get("one_liner", source.get("daily_summary", ""))
+            one_liner_clean = one_liner.replace("**", "")
+            headlines_text = " | ".join(
+                h.get("event_title", "") for h in source.get("headline", [])
+            )
+            hub_markdown = f"**{one_liner_clean}**\n\n📰 {headlines_text}"
             from delivery.notion_writer import update_hub_page
-            await update_hub_page(hub_page_id, report_markdown, report_url, today)
+            await update_hub_page(hub_page_id, hub_markdown, report_url or "", today)
             logger.info("  Updated 信息流中心 page")
 
         # 4b: Write items to inbox — one entry per event (best source only, no duplicates)

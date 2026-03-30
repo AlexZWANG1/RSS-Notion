@@ -1,12 +1,9 @@
-"""Generate a newsletter-quality daily report via LLM (Call 2).
+"""Generate a structured daily report via LLM (Call 2).
 
 This is the second LLM call in the pipeline.  It receives the structured
 tiered JSON produced by Call 1 (interest_scorer.score_items) together with
-the original source items, and asks the LLM to write a beautifully
-formatted daily report in Notion-flavored markdown.
-
-The function returns a raw markdown string — the caller is responsible for
-converting it to Notion blocks or any other delivery format.
+the original source items, and asks the LLM to produce a structured JSON
+report with editorial polish — ready for conversion to Notion blocks.
 """
 
 import json
@@ -26,76 +23,97 @@ _SYSTEM_PROMPT = """\
 你是一位顶级科技付费日报的主编。你的读者是忙碌的 AI 产品人和技术决策者——
 他们愿意为高密度、有观点的信息付费，但只有 2 分钟阅读时间。
 
-你的任务：把编辑部传来的分层选题单和原始素材，写成一份可以直接发布的日报。
+你的任务：把编辑部传来的分层选题单和原始素材，润色为可以直接发布的日报内容。
 
 ## 写作原则
 1. **像付费 newsletter 编辑一样写**，不是摘要机器人。要有判断、有态度、有节奏。
-2. 用 **加粗** 标记关键数字、公司名、转折点——让扫读的人一眼抓住重点。
-3. 每条来源文章必须保留原标题和 URL，用 Markdown 链接 `[文字](URL)` 格式。
-4. 保持可扫读性：标题层级清晰，段落短，重点前置。
-5. 中文为主，术语/专名保留英文原文。
+2. 用 **加粗**（`**文字**` markdown 标记）标记关键数字、公司名、转折点——代码会解析成 Notion bold。
+3. 保留原文标题和 URL，不要编造。
+4. 中文为主，术语/专名保留英文原文。
 
-## 输出结构（严格按顺序）
+## 输出格式
+严格输出 JSON，不要用 ```json``` 包裹，不要有其他内容。
 
-**一句话今日主线**（加粗，一句话概括今天最核心的变化）
+{
+  "one_liner": "今日主线的一句话概括（有态度、有节奏，像付费 newsletter 标题）",
 
----
+  "headline": [
+    {
+      "event_title": "事件标题（编辑润色后）",
+      "source_count": 5,
+      "analysis": "200-300 字深度分析。第一句话加粗概括核心事实。关键数字用 **加粗**。要有态度和判断。",
+      "best_source_url": "最佳来源 URL",
+      "best_source_name": "最佳来源名",
+      "related_sources": [
+        {
+          "title": "原文标题（保留原始标题）",
+          "url": "https://...",
+          "source_name": "OpenAI Blog",
+          "channel": "一手/官方",
+          "one_liner": "编辑改写的一句话，这篇文章讲了什么"
+        }
+      ]
+    }
+  ],
 
-### 📰 头条
+  "noteworthy": [
+    {
+      "event_title": "事件标题",
+      "source_count": 1,
+      "summary": "80-100 字摘要，有上下文和具体数字，关键部分 **加粗**",
+      "insight": "一句话洞察——具体说出改变了什么判断，不是「值得关注」",
+      "best_source_url": "最佳来源 URL",
+      "best_source_name": "最佳来源名",
+      "related_sources": [
+        {
+          "title": "原文标题",
+          "url": "https://...",
+          "source_name": "LangChain Blog",
+          "channel": "开源/技术/论文",
+          "one_liner": "一句话"
+        }
+      ]
+    }
+  ],
 
-对每个头条事件：
+  "glance": [
+    {
+      "title": "原文标题",
+      "source_name": "来源名",
+      "url": "https://...",
+      "channel": "一手/官方",
+      "one_liner": "一句话概括"
+    }
+  ],
 
-#### 事件标题
+  "signals": [
+    {
+      "keyword": "趋势关键词",
+      "note": "为什么值得持续关注（1-2 句话）"
+    }
+  ]
+}
 
-200-300 字深度分析。第一句话用加粗概括核心事实，然后展开：
-- 发生了什么（关键数字加粗）
-- 为什么重要（行业影响）
-- 后续值得关注什么
+## 各字段要求
+- headline: 1-3 个头条事件，每个有深度分析和完整来源列表
+- noteworthy: 2-5 个值得关注的事件
+- glance: 5-10 条速览
+- signals: 3-5 个从全量信息中提炼的趋势信号（这是你的独有价值——编辑视角的趋势判断）
+- one_liner: 一句话今日主线，要有态度
 
-每篇相关原文用 bullet list 列出，格式严格为：
-- [来源名](原文URL) **原文标题** — 一句话这篇文章讲了什么
-
-两个头条事件之间用 --- 分隔。
-
----
-
-### 🔍 值得关注
-
-对每个值得关注的事件：
-
-#### 事件标题
-
-80-100 字摘要。
-
-💡 一句话洞察（这行以💡开头，写具体的洞察内容，不要写"一句话洞察"这四个字）
-
-每篇相关原文：
-- [来源名](原文URL) **原文标题** — 一句话摘要
-
----
-
-### ⚡ 速览
-
-每条格式：
-- [来源名](原文URL) **原文标题** — 一句话摘要
-
----
-
-📊 今日数据：扫描 X 篇 → 聚合 Y 事件 → 精选 Z 条
-
----
-
-### 📡 值得持续关注的信号
-
-- **信号关键词**：简短解释为什么值得关注
-- ...（3-5 条）
+## channel 选项（严格使用以下 5 个之一）
+- "一手/官方" — 官方博客、产品发布、公司公告
+- "深度研究" — 深度分析、调研报告、长文
+- "长内容/播客" — YouTube、播客、视频内容
+- "社交/社区/Twitter" — Twitter/X、Reddit、社区讨论
+- "开源/技术/论文" — GitHub 项目、arXiv 论文、技术文章
 
 ## 注意事项
-- 所有来源链接必须使用 Markdown 链接语法：`[文字](URL)`
-- 来源列表中每篇文章单独一行，不要合并
+- analysis 和 summary 字段内可以用 **加粗** markdown 标记
+- related_sources 必须列出该事件涉及的所有原始文章，不要省略
 - 不要编造 URL，只使用提供的原始链接
-- 💡 后面直接写洞察内容，不要写"一句话洞察"这个标签
-- 如果某个层级没有内容，跳过该段落，不要留空标题\
+- insight 后面直接写洞察内容，不要写"一句话洞察"这个标签
+- 如果某个层级没有内容，输出空数组 []\
 """
 
 
@@ -134,15 +152,51 @@ def _build_user_prompt(tiered: dict, source_items: list) -> str:
     events_total = tiered.get("events_total", 0)
     selected_total = tiered.get("selected_total", 0)
     parts.append(
-        f"\n## 统计数据（用于 📊 行）\n"
+        f"\n## 统计数据\n"
         f"扫描: {total_fetched} 篇, 聚合事件: {events_total}, 精选: {selected_total}\n"
     )
 
     parts.append(
-        f"\n今天是 {date.today().isoformat()}。请按照 system prompt 的结构输出完整日报。"
+        f"\n今天是 {date.today().isoformat()}。请按照 system prompt 的 JSON 格式输出完整日报。"
     )
 
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# JSON parser
+# ---------------------------------------------------------------------------
+
+def _parse_report_json(raw: str) -> dict | None:
+    """Parse Call 2 JSON response. Returns None on failure."""
+    try:
+        text = raw.strip()
+        # Strip markdown code fences
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
+
+        data = json.loads(text)
+
+        # Validate required fields
+        required = ("headline", "noteworthy", "glance", "one_liner")
+        for key in required:
+            if key not in data:
+                logger.warning("Missing key in Call 2 response: %s", key)
+                return None
+
+        # signals is nice-to-have, default to empty
+        if "signals" not in data:
+            data["signals"] = []
+
+        return data
+    except (json.JSONDecodeError, Exception) as e:
+        logger.error("Failed to parse Call 2 JSON: %s", e)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -153,25 +207,14 @@ async def generate_daily_report(
     tiered: dict,
     source_items: list,
     config: dict,
-) -> str:
-    """Generate a newsletter-quality daily report via LLM.
+) -> dict | None:
+    """Generate a newsletter-quality daily report via LLM (Call 2).
 
-    This is Call 2 in the pipeline.  It takes the tiered dict from Call 1
-    (headline / noteworthy / glance / daily_summary) plus the original
-    source items list, and returns a formatted Notion-flavored markdown
-    string ready for delivery.
-
-    Args:
-        tiered: Tiered curation dict produced by ``score_items()``.
-        source_items: Original ``SourceItem`` list from the fetch stage.
-        config: Pipeline configuration dict (used to read model name).
-
-    Returns:
-        Markdown string of the daily report, or an empty string on failure.
+    Returns structured JSON dict, or None on failure.
     """
     if not tiered:
         logger.warning("generate_daily_report called with empty tiered data")
-        return ""
+        return None
 
     user_prompt = _build_user_prompt(tiered, source_items)
 
@@ -182,7 +225,8 @@ async def generate_daily_report(
     )
 
     logger.info(
-        "Generating daily report with model=%s  (headline=%d, noteworthy=%d, glance=%d)",
+        "Generating daily report v2 (structured JSON) with model=%s  "
+        "(headline=%d, noteworthy=%d, glance=%d)",
         model,
         len(tiered.get("headline", [])),
         len(tiered.get("noteworthy", [])),
@@ -195,7 +239,6 @@ async def generate_daily_report(
         {"role": "user", "content": user_prompt},
     ]
 
-    # Use summary_model (typically the stronger model) for report writing
     result = await _call_with_retry(
         client,
         messages,
@@ -206,16 +249,18 @@ async def generate_daily_report(
 
     if not result:
         logger.error("Daily report LLM call failed after retries")
-        return ""
+        return None
 
-    # Strip markdown code fences if the model wraps output in ```markdown ... ```
-    text = result.strip()
-    if text.startswith("```"):
-        first_nl = text.find("\n")
-        if first_nl != -1:
-            text = text[first_nl + 1:]
-    if text.endswith("```"):
-        text = text[:-3].rstrip()
+    report = _parse_report_json(result)
+    if report:
+        logger.info(
+            "Daily report v2 parsed: %d headline, %d noteworthy, %d glance, %d signals",
+            len(report.get("headline", [])),
+            len(report.get("noteworthy", [])),
+            len(report.get("glance", [])),
+            len(report.get("signals", [])),
+        )
+    else:
+        logger.error("Failed to parse Call 2 response as JSON")
 
-    logger.info("Daily report generated: %d characters", len(text))
-    return text
+    return report

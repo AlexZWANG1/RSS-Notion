@@ -52,7 +52,9 @@
           { "channel_id": "UCSI7h9hydQ40K5MJHnCrQvw", "handle": "NoPriorsPodcast", "name": "No Priors Podcast" },
           { "channel_id": "UCPk8m_r6fkUSYmvgCBwq-sw", "handle": "AndrejKarpathy", "name": "Andrej Karpathy" },
           { "channel_id": "UCXl4i9dYBrFOabk0xGmbkRA", "handle": "DwarkeshPatel", "name": "Dwarkesh Patel" },
-          { "channel_id": "UCESLZhusAkFfsNsApnjF_Cg", "handle": "alaborofdave", "name": "All-In Podcast" }
+          { "channel_id": "UCESLZhusAkFfsNsApnjF_Cg", "handle": "alaborofdave", "name": "All-In Podcast" },
+          { "channel_id": "UCZHmQk67mSJgfCCTn7xBfew", "handle": "YannicKilcher", "name": "Yannic Kilcher" },
+          { "channel_id": "UCnrLlbgSBNswirGlbkNVJuA", "handle": "AIExplained", "name": "AI Explained" }
         ]
       }
     },

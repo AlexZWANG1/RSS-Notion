@@ -12,6 +12,7 @@ import feedparser
 import yaml
 
 from sources.base import BaseSource
+from sources.content_fetcher import fetch_content_batch
 from sources.models import SourceItem
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,35 @@ class RSSFetcher(BaseSource):
             items.extend(feed_items)
         # Sort by published date descending (newest first)
         items.sort(key=lambda x: x.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+        # Enrich items with full text via Jina Reader
+        items = await self._enrich_items(items)
+        return items
+
+    @staticmethod
+    async def _enrich_items(items: list[SourceItem]) -> list[SourceItem]:
+        """Enrich items with short descriptions via Jina Reader full text."""
+        urls_to_fetch: list[str] = []
+        indices: list[int] = []
+        for i, item in enumerate(items):
+            # Skip items that already have substantial content
+            if len(item.description or "") >= 200:
+                continue
+            if not (item.url or "").startswith("http"):
+                continue
+            urls_to_fetch.append(item.url)
+            indices.append(i)
+
+        if urls_to_fetch:
+            logger.info(f"[RSS] Enriching {len(urls_to_fetch)} items with Jina Reader")
+            bodies = await fetch_content_batch(urls_to_fetch)
+            enriched = 0
+            for idx, body in zip(indices, bodies):
+                if body and len(body) > len(items[idx].description or ""):
+                    items[idx].description = body
+                    enriched += 1
+            logger.info(f"[RSS] Enriched {enriched}/{len(urls_to_fetch)} items")
+
         return items
 
     async def _fetch_feed(self, feed_cfg: dict, cutoff: datetime) -> list[SourceItem]:

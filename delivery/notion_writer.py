@@ -16,6 +16,30 @@ DATABASE_ID = "d1da0a02-bb0f-4dfd-a7d0-8cf918e6f23c"
 # Maximum characters per Notion rich_text block (API limit is 2000).
 _MAX_BLOCK_LEN = 2000
 
+# --- v2 visual upgrade constants ---
+
+_COVER_URL = "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=1200"
+
+BOOKMARK_WHITELIST = {
+    "openai.com",
+    "anthropic.com",
+    "blog.google",
+    "deepmind.google",
+    "ai.meta.com",
+    "huggingface.co",
+    "blog.langchain.dev",
+    "microsoft.com",
+    "apple.com",
+}
+
+CHANNEL_EMOJI = {
+    "一手/官方": "🔵",
+    "深度研究": "🟣",
+    "长内容/播客": "🟠",
+    "社交/社区/Twitter": "🟢",
+    "开源/技术/论文": "⚪",
+}
+
 
 # ---------------------------------------------------------------------------
 # Lightweight protocol so this module does not hard-depend on the scorer yet.
@@ -891,24 +915,42 @@ async def update_hub_page(hub_page_id: str, report_markdown: str, report_url: st
             icon = block.get("callout", {}).get("icon", {}).get("emoji", "")
 
             if icon == "📰":
-                # Blue callout — update report link
-                # Notion API can't set mention-page via rich_text patch,
-                # so we set a text with the URL
-                link_text = f"今日日报（{today}）"
+                # Blue callout — read existing links, prepend new date, keep history
+                existing_rt = block.get("callout", {}).get("rich_text", [])
+                # Extract existing date links (format: "MM-DD" with link)
+                existing_links: list[dict] = []
+                for rt in existing_rt:
+                    text_content = rt.get("text", {}).get("content", "")
+                    link_url = rt.get("text", {}).get("link", {}).get("url", "") if rt.get("text", {}).get("link") else ""
+                    # Keep date links (MM-DD format) that aren't today
+                    if link_url and rt.get("annotations", {}).get("bold") and text_content.strip() not in ("📰 日报归档", ""):
+                        if today[5:] not in text_content:  # skip today's existing entry
+                            existing_links.append(rt)
+
+                # Build new rich_text: header + today + old dates
+                new_rt: list[dict] = [
+                    {"type": "text", "text": {"content": "📰 日报归档 · "}, "annotations": {"bold": True}},
+                    {"type": "text", "text": {"content": "收件箱", "link": {"url": "https://www.notion.so/d1da0a02bb0f4dfda7d08cf918e6f23c"}}},
+                    {"type": "text", "text": {"content": " · "}},
+                    {"type": "text", "text": {"content": "⚙️ 配置", "link": {"url": "https://www.notion.so/3251683183e68100b28ff60937b0d472"}}},
+                    {"type": "text", "text": {"content": "\n"}},
+                    {"type": "text", "text": {"content": today[5:], "link": {"url": report_url}}, "annotations": {"bold": True}},
+                ]
+                # Append existing date links (up to 30 days)
+                for old_link in existing_links[:29]:
+                    new_rt.append({"type": "text", "text": {"content": " · "}})
+                    new_rt.append(old_link)
+
                 await loop.run_in_executor(
                     None,
-                    lambda bid=block["id"]: httpx.patch(
+                    lambda bid=block["id"], rt=new_rt: httpx.patch(
                         f"https://api.notion.com/v1/blocks/{bid}",
                         headers={"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28", "Content-Type": "application/json"},
-                        json={"callout": {"rich_text": [
-                            {"type": "text", "text": {"content": "📰 ", "link": {"url": report_url}}, "annotations": {"bold": True}},
-                            {"type": "text", "text": {"content": link_text, "link": {"url": report_url}}, "annotations": {"bold": True}},
-                            {"type": "text", "text": {"content": " · 收件箱 · 配置 — 点击日报链接查看完整内容"}},
-                        ]}},
+                        json={"callout": {"rich_text": rt}},
                         timeout=20.0,
                     )
                 )
-                logger.info("Updated hub blue callout link")
+                logger.info("Updated hub blue callout — appended %s", today)
                 updated = True
 
             elif icon == "📡":
@@ -988,3 +1030,364 @@ async def update_hub_page(hub_page_id: str, report_markdown: str, report_url: st
     except Exception as e:
         logger.warning(f"Failed to update hub page: {e}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# v2: Rich daily report with native Notion blocks
+# ---------------------------------------------------------------------------
+
+def _callout_block(emoji: str, rich_text: list[dict], color: str = "gray_background") -> dict:
+    """Build a callout block."""
+    return {
+        "type": "callout",
+        "callout": {
+            "icon": {"type": "emoji", "emoji": emoji},
+            "rich_text": rich_text,
+            "color": color,
+        },
+    }
+
+
+def _heading2(text: str) -> dict:
+    return {"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": text}}]}}
+
+
+def _heading3(text: str) -> dict:
+    return {"type": "heading_3", "heading_3": {"rich_text": [{"type": "text", "text": {"content": text}}]}}
+
+
+def _paragraph(rich_text: list[dict]) -> dict:
+    return {"type": "paragraph", "paragraph": {"rich_text": rich_text}}
+
+
+def _bold_text(content: str) -> dict:
+    return {"type": "text", "text": {"content": content}, "annotations": {"bold": True}}
+
+
+def _plain_text(content: str) -> dict:
+    return {"type": "text", "text": {"content": content}}
+
+
+def _link_text(content: str, url: str, bold: bool = False) -> dict:
+    rt: dict = {"type": "text", "text": {"content": content, "link": {"url": url}}}
+    if bold:
+        rt["annotations"] = {"bold": True}
+    return rt
+
+
+def _divider() -> dict:
+    return {"type": "divider", "divider": {}}
+
+
+def _bullet(rich_text: list[dict]) -> dict:
+    return {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": rich_text}}
+
+
+def _bookmark_block(url: str) -> dict:
+    return {"type": "bookmark", "bookmark": {"url": url}}
+
+
+def _table_block(width: int, rows: list[list[list[dict]]]) -> list[dict]:
+    """Build a table block + its table_row children.
+
+    Args:
+        width: Number of columns.
+        rows: List of rows. Each row is a list of cells.
+              Each cell is a list of rich_text dicts.
+
+    Returns:
+        A list containing the table block (with children).
+    """
+    table_rows = []
+    for row in rows:
+        # Pad short rows
+        while len(row) < width:
+            row.append([_plain_text("")])
+        table_rows.append({
+            "type": "table_row",
+            "table_row": {"cells": row},
+        })
+    return [{
+        "type": "table",
+        "table": {
+            "table_width": width,
+            "has_column_header": True,
+            "has_row_header": False,
+            "children": table_rows,
+        },
+    }]
+
+
+def _url_in_whitelist(url: str) -> bool:
+    """Check if URL domain is in the bookmark whitelist."""
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+        return any(host == d or host.endswith("." + d) for d in BOOKMARK_WHITELIST)
+    except Exception:
+        return False
+
+
+def _channel_emoji(channel: str) -> str:
+    return CHANNEL_EMOJI.get(channel, "⚪")
+
+
+def _build_v2_blocks(
+    report: dict,
+    total_fetched: int,
+    today: str,
+) -> list[dict]:
+    """Build Notion blocks for the v2 daily report page.
+
+    Args:
+        report: Either Call 2 edited JSON or Call 1 tiered dict (same schema).
+        total_fetched: Total articles scanned (from pipeline).
+        today: Date string YYYY-MM-DD.
+
+    Returns:
+        List of Notion block dicts (may exceed 100 — caller must batch).
+    """
+    blocks: list[dict] = []
+
+    headlines = report.get("headline", [])
+    noteworthies = report.get("noteworthy", [])
+    glances = report.get("glance", [])
+    signals = report.get("signals", [])
+    events_total = report.get("events_total", 0)
+    selected_total = report.get(
+        "selected_total",
+        len(headlines) + len(noteworthies) + len(glances),
+    )
+
+    # === Top stats callout (blue) ===
+    stats_line = (
+        f"扫描 {total_fetched} 篇 → 聚合 {events_total} 事件 → 精选 {selected_total} 条"
+        f" · 📰 头条 {len(headlines)} · 🔍 关注 {len(noteworthies)} · ⚡ 速览 {len(glances)}"
+    )
+    blocks.append(_callout_block("📊", [_bold_text(stats_line)], "blue_background"))
+
+    # === One-liner callout (yellow) ===
+    one_liner = report.get("one_liner") or report.get("daily_summary", "")
+    if one_liner:
+        blocks.append(_callout_block("📡", _parse_inline_markdown(one_liner), "yellow_background"))
+
+    blocks.append(_divider())
+
+    # === Headlines ===
+    if headlines:
+        blocks.append(_heading2("📰 头条"))
+
+        for item in headlines:
+            title = item.get("event_title", "")
+            blocks.append(_heading3(f"🔥 {title}"))
+
+            # Source count + best source line
+            sc = item.get("source_count", len(item.get("related_sources", [])))
+            best_name = item.get("best_source_name", "")
+            source_line = f"🔗 被 {sc} 个来源报道"
+            if best_name:
+                source_line += f" · 最佳来源：{best_name}"
+            blocks.append(_paragraph([_bold_text(source_line)]))
+
+            # Analysis paragraph (parse bold)
+            analysis = item.get("analysis", "")
+            if analysis:
+                blocks.append(_paragraph(_parse_inline_markdown(analysis[:_MAX_BLOCK_LEN])))
+
+            # Sources table (3 columns: 来源 / 标题 / 要点)
+            sources = item.get("related_sources", [])
+            if sources:
+                rows: list[list[list[dict]]] = [
+                    [[_bold_text("来源")], [_bold_text("标题")], [_bold_text("要点")]],
+                ]
+                for src in sources:
+                    ch = _channel_emoji(src.get("channel", ""))
+                    name = src.get("source_name", "")
+                    src_title = src.get("title", "")
+                    src_url = src.get("url", "")
+                    liner = src.get("one_liner", "")
+                    cell1 = [_plain_text(f"{ch} {name}")]
+                    if src_url:
+                        cell2 = [_link_text(src_title, src_url)]
+                    else:
+                        cell2 = [_plain_text(src_title)]
+                    cell3 = [_plain_text(liner)]
+                    rows.append([cell1, cell2, cell3])
+                blocks.extend(_table_block(3, rows))
+
+            # Bookmark for best source (if whitelisted)
+            best_url = item.get("best_source_url", "")
+            if best_url and _url_in_whitelist(best_url):
+                blocks.append(_bookmark_block(best_url))
+
+            blocks.append(_divider())
+
+    # === Noteworthy ===
+    if noteworthies:
+        blocks.append(_heading2("🔍 值得关注"))
+
+        for item in noteworthies:
+            title = item.get("event_title", "")
+            blocks.append(_heading3(title))
+
+            # Summary paragraph
+            summary = item.get("summary", "")
+            if summary:
+                blocks.append(_paragraph(_parse_inline_markdown(summary[:_MAX_BLOCK_LEN])))
+
+            # Insight callout (yellow)
+            insight = item.get("insight", "")
+            if insight:
+                blocks.append(_callout_block("💡", _parse_inline_markdown(insight), "yellow_background"))
+
+            # Source links (inline — fewer sources here)
+            sources = item.get("related_sources", [])
+            for src in sources:
+                ch = _channel_emoji(src.get("channel", ""))
+                name = src.get("source_name", "")
+                src_title = src.get("title", "")
+                src_url = src.get("url", "")
+                liner = src.get("one_liner", "")
+                rt: list[dict] = [_plain_text(f"{ch} ")]
+                if src_url:
+                    rt.append(_link_text(name, src_url))
+                else:
+                    rt.append(_plain_text(name))
+                rt.append(_plain_text(" — "))
+                rt.append(_bold_text(src_title))
+                if liner:
+                    rt.append(_plain_text(f" — {liner}"))
+                blocks.append(_paragraph(rt))
+
+        blocks.append(_divider())
+
+    # === Glance table ===
+    if glances:
+        blocks.append(_heading2("⚡ 速览"))
+
+        rows = [
+            [[_bold_text("来源")], [_bold_text("动态")]],
+        ]
+        for item in glances:
+            ch = _channel_emoji(item.get("channel", ""))
+            name = item.get("source_name", "")
+            liner = item.get("one_liner", "")
+            title = item.get("title", "")
+            url = item.get("url", "")
+            cell1 = [_plain_text(f"{ch} {name}")]
+            # Cell 2: title (linked if URL available) + one-liner
+            if url and title:
+                cell2 = [_link_text(title, url)]
+                if liner:
+                    cell2.append(_plain_text(f" — {liner}"))
+            elif title and liner:
+                cell2 = [_bold_text(title), _plain_text(f" — {liner}")]
+            elif liner:
+                cell2 = [_plain_text(liner)]
+            else:
+                cell2 = [_plain_text(title)]
+            rows.append([cell1, cell2])
+        blocks.extend(_table_block(2, rows))
+
+        blocks.append(_divider())
+
+    # === Signals ===
+    if signals:
+        blocks.append(_heading2("📡 值得持续关注的信号"))
+        for sig in signals:
+            kw = sig.get("keyword", "")
+            note = sig.get("note", "")
+            blocks.append(_bullet([_bold_text(kw), _plain_text(f" — {note}")]))
+        blocks.append(_divider())
+
+    # === Footer stats callout (blue) ===
+    footer = (
+        f"来源统计 · 扫描 {total_fetched} 篇 → 聚合 {events_total} 事件"
+        f" → 精选 {selected_total} 条 · 由 AI Daily Digest 自动生成 · {today}"
+    )
+    blocks.append(_callout_block("📊", [_bold_text(footer)], "blue_background"))
+
+    return blocks
+
+
+async def write_daily_report_v2(
+    report: dict | None,
+    tiered: dict,
+    today: str,
+    total_fetched: int,
+) -> str | None:
+    """Create a visually rich daily report page using native Notion blocks.
+
+    Args:
+        report: Call 2 edited JSON (or None to fallback to tiered).
+        tiered: Call 1 tiered dict (used as fallback + stats source).
+        today: Date string YYYY-MM-DD.
+        total_fetched: Total articles scanned.
+
+    Returns:
+        Notion page URL, or None on failure.
+    """
+    notion = _get_notion_client()
+    if not notion:
+        return None
+
+    # Use Call 2 report if available, otherwise fallback to Call 1 tiered
+    data = report if report else tiered
+    if not data:
+        logger.error("No data for daily report v2")
+        return None
+
+    # Merge stats from tiered (authoritative) into data for block builder
+    if "events_total" not in data:
+        data["events_total"] = tiered.get("events_total", 0)
+    if "selected_total" not in data:
+        data["selected_total"] = tiered.get("selected_total", 0)
+    # Prefer Call 2's one_liner; fallback to Call 1's daily_summary
+    if "one_liner" not in data:
+        data["one_liner"] = tiered.get("daily_summary", "")
+
+    blocks = _build_v2_blocks(data, total_fetched, today)
+    logger.info("Writing daily report v2 with %d blocks", len(blocks))
+
+    title = f"📰 AI Daily — {today}"
+
+    try:
+        loop = asyncio.get_running_loop()
+
+        # Create page with first 100 blocks
+        page = await loop.run_in_executor(
+            None,
+            lambda: notion.pages.create(
+                parent={"database_id": DATABASE_ID},
+                icon={"type": "emoji", "emoji": "🤖"},
+                cover={"type": "external", "external": {"url": _COVER_URL}},
+                properties={
+                    "名称": {"title": [{"text": {"content": title}}]},
+                    "来源": {"select": {"name": "系统"}},
+                    "重要性": {"select": {"name": "高"}},
+                    "收录时间": {"date": {"start": today}},
+                },
+                children=blocks[:100],
+            ),
+        )
+
+        page_id = page["id"]
+        url = page.get("url", "")
+
+        # Append remaining blocks in batches of 100
+        for i in range(100, len(blocks), 100):
+            batch = blocks[i : i + 100]
+            await loop.run_in_executor(
+                None,
+                lambda b=batch: notion.blocks.children.append(
+                    block_id=page_id, children=b
+                ),
+            )
+            logger.info("Appended blocks %d-%d", i, i + len(batch))
+
+        logger.info("Daily report v2 created: %s", url)
+        return url
+
+    except Exception as e:
+        logger.error("Failed to create daily report v2: %s", e)
+        return None
