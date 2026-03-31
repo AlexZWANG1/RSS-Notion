@@ -42,7 +42,7 @@
       },
       "youtube": {
         "enabled": true,
-        "max_items": 15,
+        "max_items": 20,
         "max_age_days": 7,
         "channels": [
           { "channel_id": "UCMLtBahI5DMrt0NPvDSoIRQ", "handle": "NoPriorsPodcast", "name": "No Priors" },
