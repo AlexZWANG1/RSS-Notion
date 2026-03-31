@@ -348,9 +348,35 @@ async def run_pipeline(
         sync_result = await sync_clipper_items(config)
         logger.info(f"  Clipper sync: {sync_result['processed']} processed, {len(sync_result['errors'])} errors")
 
-    # --- Phase 9: Inbox Cleanup ---
+    # --- Phase 9: Sync Web Clipper → Prism knowledge base ---
     if not skip_notion:
-        logger.info("Phase 9: Cleaning up inbox...")
+        try:
+            from scripts.sync_clipper_to_prism import fetch_clipper_items, fetch_article_text, ingest_to_prism, mark_as_processed
+            logger.info("Phase 9: Syncing Web Clipper → Prism knowledge base...")
+            clipper_items = await fetch_clipper_items(only_unprocessed=True)
+            prism_synced = 0
+            for item in clipper_items:
+                if not item["url"]:
+                    continue
+                text = await fetch_article_text(item["url"])
+                if not text or len(text) < 100:
+                    text = item.get("summary", "")
+                if text:
+                    result = ingest_to_prism(
+                        title=item["title"], content=text, url=item["url"],
+                        tags=item["tags"], summary=item.get("summary", ""),
+                        insight=item.get("insight", ""), importance=item.get("importance", ""),
+                    )
+                    if result:
+                        prism_synced += 1
+                await mark_as_processed(item["page_id"])
+            logger.info(f"  Prism sync: {prism_synced}/{len(clipper_items)} items ingested")
+        except Exception as e:
+            logger.warning(f"  Prism sync skipped: {e}")
+
+    # --- Phase 10: Inbox Cleanup ---
+    if not skip_notion:
+        logger.info("Phase 10: Cleaning up inbox...")
         cleanup_stats = await cleanup_inbox(retention_days=7)
         logger.info(f"  Cleanup: {cleanup_stats['deleted']} deleted")
     else:
