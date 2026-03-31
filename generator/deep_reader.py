@@ -49,6 +49,36 @@ def _is_youtube_url(url: str) -> bool:
 _COOKIE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "youtube_cookies.txt")
 
 
+def _build_session_with_cookies() -> "requests.Session":
+    """Build a requests.Session with YouTube cookies and proxy if available."""
+    import http.cookiejar
+    import requests
+
+    session = requests.Session()
+    cj = http.cookiejar.MozillaCookieJar(_COOKIE_PATH)
+    cj.load(ignore_discard=True, ignore_expires=True)
+    session.cookies = cj
+
+    # Use proxy if configured (Clash default: 7897)
+    proxy_url = os.environ.get("YT_PROXY") or os.environ.get("HTTPS_PROXY", "")
+    if not proxy_url:
+        # Auto-detect common Clash ports
+        import socket
+        for port in (7897, 7890, 1080):
+            try:
+                s = socket.create_connection(("127.0.0.1", port), timeout=1)
+                s.close()
+                proxy_url = f"http://127.0.0.1:{port}"
+                break
+            except OSError:
+                continue
+    if proxy_url:
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+        logger.info(f"YouTube proxy: {proxy_url}")
+
+    return session
+
+
 async def fetch_transcript(video_id: str) -> Optional[str]:
     """Fetch YouTube transcript using youtube-transcript-api v1.x.
 
@@ -60,10 +90,10 @@ async def fetch_transcript(video_id: str) -> Optional[str]:
         loop = asyncio.get_running_loop()
 
         # Use cookies if available (bypasses YouTube IP blocks)
-        cookie_path = _COOKIE_PATH if os.path.isfile(_COOKIE_PATH) else None
-        if cookie_path:
-            logger.info(f"Using YouTube cookies from {cookie_path}")
-            api = YouTubeTranscriptApi(cookie_path=cookie_path)
+        if os.path.isfile(_COOKIE_PATH):
+            logger.info(f"Using YouTube cookies from {_COOKIE_PATH}")
+            session = _build_session_with_cookies()
+            api = YouTubeTranscriptApi(http_client=session)
         else:
             api = YouTubeTranscriptApi()
 
