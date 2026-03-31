@@ -29,7 +29,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PRISM_ROOT))
 
 from dotenv import load_dotenv
+# Load RSS-Notion .env first (for NOTION_TOKEN)
 load_dotenv(PROJECT_ROOT / ".env")
+# Then load Prism .env to override embedding config (EMBEDDING_PROVIDER=ollama)
+load_dotenv(PRISM_ROOT / ".env", override=True)
+# Ensure NOTION_TOKEN survives the override
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 logging.basicConfig(
     level=logging.INFO,
