@@ -1,6 +1,7 @@
 rss:
   # sources.yaml 只放 Folo 里没有的源作为补充
   # Twitter/博客/播客 全部由 Folo 管理，不在这里重复
+  # Folo 已有: The Verge, WIRED, Stratechery, Benedict Evans 等（系统自动去重）
 
   # ── 官方一手（Frontier Lab） ──
   - { name: "OpenAI News", url: "https://openai.com/news/rss.xml", category: "官方一手" }
@@ -12,6 +13,8 @@ rss:
   - { name: "Meta AI Blog", url: "https://ai.meta.com/blog/rss/", category: "官方一手" }
   - { name: "Mistral AI Blog", url: "https://mistral.ai/feed/", category: "官方一手" }
   - { name: "NVIDIA AI Blog", url: "https://blogs.nvidia.com/feed/", category: "官方一手" }
+  - { name: "Stability AI Blog", url: "https://stability.ai/blog/feed", category: "官方一手" }
+  - { name: "Cohere Blog", url: "https://cohere.com/blog/feed", category: "官方一手" }
 
   # ── AI 技术社区 ──
   - { name: "HuggingFace Blog", url: "https://huggingface.co/blog/feed.xml", category: "AI技术社区" }
@@ -29,6 +32,12 @@ rss:
   - { name: "Zvi Mowshowitz", url: "https://thezvi.substack.com/feed", category: "独立研究" }
   - { name: "Interconnects (Nathan Lambert)", url: "https://www.interconnects.ai/feed", category: "独立研究" }
   - { name: "ChinAI (Jeff Ding)", url: "https://chinai.substack.com/feed", category: "独立研究" }
+  - { name: "The Gradient", url: "https://thegradientpub.substack.com/feed", category: "独立研究" }
+  - { name: "AlphaSignal", url: "https://alphasignalai.substack.com/feed", category: "独立研究" }
+  - { name: "AI Snake Oil", url: "https://aisnakeoil.substack.com/feed", category: "独立研究" }
+  - { name: "Chip Huyen", url: "https://huyenchip.com/feed.xml", category: "独立研究" }
+  - { name: "Last Week in AI", url: "https://lastweekin.ai/feed", category: "独立研究" }
+  - { name: "Alignment Forum", url: "https://www.alignmentforum.org/feed.xml", category: "AI安全" }
 
   # ── 中文媒体 ──
   - { name: "36氪", url: "https://36kr.com/feed", category: "中文媒体" }
@@ -39,6 +48,7 @@ rss:
   - { name: "Ars Technica AI", url: "https://arstechnica.com/ai/feed/", category: "英文媒体" }
   - { name: "MIT Technology Review AI", url: "https://www.technologyreview.com/topic/artificial-intelligence/feed", category: "英文媒体" }
   - { name: "Semafor", url: "https://www.semafor.com/rss.xml", category: "英文媒体" }
+  - { name: "TechCrunch AI", url: "https://techcrunch.com/category/artificial-intelligence/feed/", category: "英文媒体" }
 
 # Tavily 定向搜索（补漏无 RSS 的站点）
 search:
@@ -50,3 +60,4 @@ search:
     - { site: "menlovc.com", query: "AI investment insights" }
     - { site: "metr.org", query: "AI safety evaluation" }
     - { site: "lmarena.ai", query: "chatbot arena model ranking" }
+    - { site: "x.ai", query: "xAI Grok announcements" }
