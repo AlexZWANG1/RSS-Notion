@@ -351,7 +351,7 @@ async def run_pipeline(
     # --- Phase 9: Inbox Cleanup ---
     if not skip_notion:
         logger.info("Phase 9: Cleaning up inbox...")
-        cleanup_stats = await cleanup_inbox(retention_days=3)
+        cleanup_stats = await cleanup_inbox(retention_days=7)
         logger.info(f"  Cleanup: {cleanup_stats['deleted']} deleted")
     else:
         logger.info("Phase 9: Inbox cleanup skipped (--skip-notion)")
@@ -396,7 +396,7 @@ def main():
     args = parser.parse_args()
 
     if args.cleanup_only:
-        stats = asyncio.run(cleanup_inbox(retention_days=3))
+        stats = asyncio.run(cleanup_inbox(retention_days=7))
         print(f"Cleanup done: {stats['deleted']} deleted, {len(stats.get('errors', []))} errors")
         sys.exit(0)
 
