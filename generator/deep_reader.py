@@ -281,7 +281,7 @@ def _text_block(text: str) -> dict:
 
 
 def _build_summary_blocks(summary: str, is_video: bool = True) -> list[dict]:
-    """Convert LLM summary text into Notion blocks."""
+    """Convert LLM summary text into Notion blocks, including markdown tables."""
     from delivery.notion_writer import _parse_inline_markdown
 
     blocks: list[dict] = []
@@ -298,15 +298,72 @@ def _build_summary_blocks(summary: str, is_video: bool = True) -> list[dict]:
     })
     blocks.append({"type": "divider", "divider": {}})
 
-    # Parse markdown into Notion blocks
-    for line in summary.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
+    lines = summary.split("\n")
+    i = 0
+    while i < len(lines):
         if len(blocks) >= 95:
             break
 
-        if line.startswith("### "):
+        line = lines[i].strip()
+        i += 1
+
+        if not line:
+            continue
+
+        # Detect markdown table: line starts with | and contains |
+        if line.startswith("|") and "|" in line[1:]:
+            # Collect all consecutive table lines
+            table_lines = [line]
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                table_lines.append(lines[i].strip())
+                i += 1
+
+            # Parse table into Notion table block
+            rows: list[list[list[dict]]] = []
+            for tl in table_lines:
+                # Skip separator lines (|---|---|)
+                if re.match(r"^\|[\s\-:|]+\|$", tl):
+                    continue
+                # Split cells
+                cells_raw = [c.strip() for c in tl.split("|")]
+                # Remove empty first/last from leading/trailing |
+                cells_raw = [c for c in cells_raw if c or cells_raw.index(c) not in (0, len(cells_raw) - 1)]
+                cells_raw = [c for c in cells_raw if c != ""]
+                if not cells_raw:
+                    continue
+                row = [_parse_inline_markdown(cell) for cell in cells_raw]
+                rows.append(row)
+
+            if rows:
+                width = max(len(r) for r in rows)
+                # Pad short rows
+                for r in rows:
+                    while len(r) < width:
+                        r.append([{"type": "text", "text": {"content": ""}}])
+                table_rows = []
+                for row in rows:
+                    table_rows.append({
+                        "type": "table_row",
+                        "table_row": {"cells": row},
+                    })
+                blocks.append({
+                    "type": "table",
+                    "table": {
+                        "table_width": width,
+                        "has_column_header": True,
+                        "has_row_header": False,
+                        "children": table_rows,
+                    },
+                })
+            continue
+
+        # Headings
+        if line.startswith("# ") and not line.startswith("# #"):
+            blocks.append({
+                "type": "heading_1",
+                "heading_1": {"rich_text": _parse_inline_markdown(line[2:])},
+            })
+        elif line.startswith("### "):
             blocks.append({
                 "type": "heading_3",
                 "heading_3": {"rich_text": _parse_inline_markdown(line[4:])},
@@ -325,6 +382,14 @@ def _build_summary_blocks(summary: str, is_video: bool = True) -> list[dict]:
             blocks.append({
                 "type": "quote",
                 "quote": {"rich_text": _parse_inline_markdown(line[2:])},
+            })
+        elif line == "---":
+            blocks.append({"type": "divider", "divider": {}})
+        elif line.startswith("#") and " " in line:
+            # Hashtags line — render as gray text
+            blocks.append({
+                "type": "paragraph",
+                "paragraph": {"rich_text": [{"type": "text", "text": {"content": line}, "annotations": {"color": "gray"}}]},
             })
         else:
             blocks.append({
