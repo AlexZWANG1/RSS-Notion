@@ -117,12 +117,24 @@ async def _call_with_retry(
                 "messages": messages,
                 "temperature": temperature,
                 "timeout": 300.0,
+                "stream": True,
             }
             if response_format is not None:
                 kwargs["response_format"] = response_format
 
-            response = await client.chat.completions.create(**kwargs)
-            return response.choices[0].message.content
+            # Streaming mode: works around CLIProxyAPI/EasyCLI bug where
+            # non-stream responses return message.content=None for Codex-backed
+            # models (gpt-5.x). Streamed chunks bypass that aggregation path.
+            stream = await client.chat.completions.create(**kwargs)
+            chunks: list[str] = []
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    chunks.append(delta.content)
+            content = "".join(chunks)
+            return content if content else None
 
         except Exception as exc:
             if attempt < max_retries:
@@ -348,8 +360,10 @@ async def load_user_interests(config: dict | None = None) -> UserInterests:
 
     notion_cfg = (config or {}).get("notion", {})
     page_id = notion_cfg.get("config_page_id", CONFIG_PAGE_ID)
-    research_db = notion_cfg.get("research_database_data_source", "")
-    research_id = research_db.replace("collection://", "") if research_db else RESEARCH_DB_ID
+    research_id = notion_cfg.get("research_database_id", "")
+    if not research_id:
+        research_db = notion_cfg.get("research_database_data_source", "")
+        research_id = research_db.replace("collection://", "") if research_db else RESEARCH_DB_ID
 
     loop = asyncio.get_running_loop()
 
