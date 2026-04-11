@@ -59,7 +59,8 @@ class TavilySearchSource(BaseSource):
                 if not site:
                     continue
 
-                query_items = await self._search_site(client, site, source_name)
+                query = sq.get("query", "")
+                query_items = await self._search_site(client, site, source_name, query)
                 for item in query_items:
                     if item.url not in seen_urls:
                         seen_urls.add(item.url)
@@ -68,13 +69,14 @@ class TavilySearchSource(BaseSource):
         return items
 
     async def _search_site(
-        self, client: httpx.AsyncClient, site: str, source_name: str
+        self, client: httpx.AsyncClient, site: str, source_name: str, query: str = ""
     ) -> list[SourceItem]:
         """Search a specific site via Tavily."""
         try:
+            search_query = f"site:{site} {query}".strip() if query else f"site:{site}"
             payload = {
                 "api_key": self.api_key,
-                "query": f"site:{site}",
+                "query": search_query,
                 "max_results": self.max_per_query,
                 "search_depth": "basic",
                 "include_answer": False,

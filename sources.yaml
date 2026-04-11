@@ -10,10 +10,10 @@ rss:
   - { name: "Microsoft Research", url: "https://www.microsoft.com/en-us/research/feed/", category: "官方一手" }
   - { name: "Apple ML Research", url: "https://machinelearning.apple.com/rss.xml", category: "官方一手" }
   - { name: "Anthropic Research", url: "https://raw.githubusercontent.com/conoro/anthropic-engineering-rss-feed/main/anthropic_engineering_rss.xml", category: "官方一手" }
-  - { name: "Meta AI Blog", url: "https://ai.meta.com/blog/rss/", category: "官方一手" }
-  - { name: "Mistral AI Blog", url: "https://mistral.ai/feed/", category: "官方一手" }
+  # Meta AI Blog — RSS 已失效(400)，改用 Tavily 补漏
+  # Mistral AI Blog — RSS 已失效(404)，改用 Tavily 补漏
+  # Stability AI Blog — RSS 已失效(404)，已移除
   - { name: "NVIDIA AI Blog", url: "https://blogs.nvidia.com/feed/", category: "官方一手" }
-  - { name: "Stability AI Blog", url: "https://stability.ai/blog/feed", category: "官方一手" }
   - { name: "Cohere Blog", url: "https://cohere.com/blog/feed", category: "官方一手" }
 
   # ── AI 技术社区 ──
@@ -22,6 +22,8 @@ rss:
   # ── 投资机构 ──
   - { name: "a16z Future", url: "https://future.a16z.com/feed/", category: "投资机构" }
   - { name: "Sequoia Capital", url: "https://www.sequoiacap.com/feed/", category: "投资机构" }
+  - { name: "ARK Invest", url: "https://ark-invest.com/feed/", category: "投资机构" }
+  - { name: "Exponential View", url: "https://www.exponentialview.co/feed", category: "投资机构" }
 
   # ── 独立研究/深度分析 ──
   - { name: "Semianalysis", url: "https://semianalysis.com/feed/", category: "独立研究" }
@@ -50,6 +52,16 @@ rss:
   - { name: "Semafor", url: "https://www.semafor.com/rss.xml", category: "英文媒体" }
   - { name: "TechCrunch AI", url: "https://techcrunch.com/category/artificial-intelligence/feed/", category: "英文媒体" }
 
+  # ── 国际/亚洲 ──
+  - { name: "Nikkei Asia Tech", url: "https://asia.nikkei.com/rss/feed/nar?type=topic&name=Technology", category: "国际视角" }
+
+  # ── 财经媒体（市场观察用） ──
+  - { name: "Bloomberg Tech", url: "https://feeds.bloomberg.com/technology/news.rss", category: "财经媒体" }
+  - { name: "Reuters Tech", url: "https://www.reutersagency.com/feed/?best-topics=tech", category: "财经媒体" }
+  - { name: "CNBC Tech", url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910", category: "财经媒体" }
+  - { name: "Financial Times Tech", url: "https://www.ft.com/technology?format=rss", category: "财经媒体" }
+  - { name: "MarketWatch Tech", url: "https://feeds.marketwatch.com/marketwatch/StockstoWatch/", category: "财经媒体" }
+
 # Tavily 定向搜索（补漏无 RSS 的站点）
 search:
   enabled: true
@@ -61,3 +73,5 @@ search:
     - { site: "metr.org", query: "AI safety evaluation" }
     - { site: "lmarena.ai", query: "chatbot arena model ranking" }
     - { site: "x.ai", query: "xAI Grok announcements" }
+    - { site: "ai.meta.com", query: "Meta AI research blog" }
+    - { site: "mistral.ai", query: "Mistral AI model release" }

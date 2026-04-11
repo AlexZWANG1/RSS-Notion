@@ -7,12 +7,11 @@ types, or numeric thresholds.
 
 import asyncio
 import json
+from pathlib import Path
 import logging
 import os
 from dataclasses import dataclass, field
 from typing import Optional
-
-from openai import AsyncOpenAI
 
 from sources.models import SourceItem
 
@@ -70,90 +69,115 @@ class UserFeedback:
 
 
 # ---------------------------------------------------------------------------
-# OpenAI client
+# Claude CLI backend
 # ---------------------------------------------------------------------------
 
-def _get_client() -> AsyncOpenAI:
-    """Create an AsyncOpenAI client with Langfuse observability if configured."""
-    client = AsyncOpenAI(
-        api_key=os.environ.get("OPENAI_API_KEY", ""),
-        base_url=os.environ.get("OPENAI_BASE_URL"),
-        timeout=300.0,
-    )
-
-    # Wrap with Langfuse if configured
-    if os.environ.get("LANGFUSE_SECRET_KEY"):
-        try:
-            from langfuse.openai import AsyncOpenAI as LangfuseAsyncOpenAI
-            client = LangfuseAsyncOpenAI(
-                api_key=os.environ.get("OPENAI_API_KEY", ""),
-                base_url=os.environ.get("OPENAI_BASE_URL"),
-                timeout=300.0,
-            )
-            logger.info("Langfuse observability enabled")
-        except ImportError:
-            logger.debug("langfuse not installed, skipping observability")
-        except Exception as e:
-            logger.warning(f"Langfuse init failed: {e}")
-
-    return client
-
-
 async def _call_with_retry(
-    client: AsyncOpenAI,
+    client: None,
     messages: list[dict],
     model: str,
     temperature: float,
     max_retries: int,
     response_format: Optional[dict] = None,
 ) -> Optional[str]:
-    """Call the OpenAI API with exponential backoff retry."""
-    backoff_seconds = [1, 4, 16]
+    """Call Claude CLI (`claude -p`) with retry.
+
+    Uses stdout-to-file redirection to avoid Windows pipe issues.
+    """
+    import tempfile
+
+    # Build prompt: combine system + user messages
+    parts: list[str] = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        if role == "system":
+            parts.append(f"<system>\n{msg['content']}\n</system>\n")
+        else:
+            parts.append(msg["content"])
+    prompt_text = "\n".join(parts)
+
+    backoff_seconds = [2, 8, 30]
 
     for attempt in range(max_retries + 1):
         try:
-            kwargs: dict = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "timeout": 300.0,
-                "stream": True,
-            }
-            if response_format is not None:
-                kwargs["response_format"] = response_format
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8",
+            ) as f:
+                f.write(prompt_text)
+                tmp_path = f.name
 
-            # Streaming mode: works around CLIProxyAPI/EasyCLI bug where
-            # non-stream responses return message.content=None for Codex-backed
-            # models (gpt-5.x). Streamed chunks bypass that aggregation path.
-            stream = await client.chat.completions.create(**kwargs)
-            chunks: list[str] = []
-            async for chunk in stream:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    chunks.append(delta.content)
-            content = "".join(chunks)
+            resp_tmp = tempfile.NamedTemporaryFile(
+                delete=False, suffix=".json", mode="wb",
+            )
+            resp_path = resp_tmp.name
+            resp_tmp.close()
+
+            try:
+                cmd = ["claude", "-p", "--output-format", "json", "--model", model]
+                env = {**os.environ}
+                env.pop("CLAUDECODE", None)
+
+                resp_fh = open(resp_path, "wb")
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=resp_fh,
+                        stderr=asyncio.subprocess.PIPE,
+                        env=env,
+                    )
+                    _, stderr = await asyncio.wait_for(
+                        proc.communicate(input=prompt_text.encode("utf-8")),
+                        timeout=1800,
+                    )
+                finally:
+                    resp_fh.close()
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+
+            raw_bytes = Path(resp_path).read_bytes()
+            Path(resp_path).unlink(missing_ok=True)
+            raw = raw_bytes.decode("utf-8", errors="replace").strip()
+
+            stderr_text = stderr.decode("utf-8", errors="replace").strip()
+            if stderr_text:
+                logger.warning("Claude CLI stderr (first 300): %s", stderr_text[:300])
+
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"claude exited {proc.returncode}: {stderr_text[:500]}"
+                )
+
+            # Extract result from JSON wrapper
+            try:
+                wrapper = json.loads(raw)
+                content = wrapper.get("result", "").strip()
+            except json.JSONDecodeError:
+                content = raw
+
+            logger.info("Claude CLI: %d bytes raw, %d chars result",
+                        len(raw_bytes), len(content))
             return content if content else None
 
         except Exception as exc:
             if attempt < max_retries:
-                delay = backoff_seconds[attempt]
+                delay = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
                 logger.warning(
-                    "OpenAI call failed (attempt %d/%d): %s — retrying in %ds",
-                    attempt + 1,
-                    max_retries + 1,
-                    exc,
-                    delay,
+                    "Claude CLI call failed (attempt %d/%d): %s — retrying in %ds",
+                    attempt + 1, max_retries + 1, exc, delay,
                 )
                 await asyncio.sleep(delay)
             else:
                 logger.error(
-                    "OpenAI call failed after %d attempts: %s",
-                    max_retries + 1,
-                    exc,
+                    "Claude CLI call failed after %d attempts: %s",
+                    max_retries + 1, exc,
                 )
                 return None
+
+
+def _get_client():
+    """Legacy compat — returns None."""
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -464,18 +488,8 @@ def _build_scoring_prompt(items: list, clipper_text: str, interests_text: str, s
 ## 任务二：日报摘要
 写一段 50-100 字的今日总结，概括今天信息流的主线和关键信号。
 
-## 任务三：运行报告
-根据你收到的全量文章和数据源统计信息，撰写一份完整的系统运行报告。报告需要包含以下部分：
-
-1. **处理概览**：一句话总结今天的处理情况（抓取总数、精选总数、通过率）
-2. **数据源明细表**：逐个列出每个数据源的名称、抓取条数、耗时、状态，以及该源下的所有文章标题（每篇一行）。格式示例：
-   【Folo】60条 | 2765ms | ✅
-     · 文章标题1
-     · 文章标题2
-3. **筛选决策说明**：为什么选了这些、淘汰了哪些、有哪些边界案例
-4. **事件聚类说明**：哪些文章被合并了、为什么选择某个作为最佳来源
-5. **信号与趋势**：从今天全量信息中发现的趋势、异常、值得持续关注的信号
-6. **自我反思**：这次筛选可能漏掉了什么？信息源有什么偏差？下次可以改进什么？
+## 任务三：筛选反思
+写一段 200-300 字的筛选反思，包含：筛选决策说明、事件聚类理由、信号与趋势、可能遗漏的内容。
 
 ## 输出格式
 严格输出 JSON，不要有其他内容：
@@ -484,7 +498,7 @@ def _build_scoring_prompt(items: list, clipper_text: str, interests_text: str, s
   "noteworthy": [{"event_title": "...", "source_count": N, "best_source_url": "...", "best_source_name": "...", "summary": "80-100字", "insight": "一句话", "related_sources": [{"title": "原文标题", "url": "...", "source_name": "来源名", "channel": "来源分类", "one_liner": "这篇文章的一句话摘要"}]}],
   "glance": [{"title": "原文标题", "url": "...", "source_name": "来源名", "channel": "来源分类", "one_liner": "一句话摘要"}],
   "daily_summary": "50-100字今日总结",
-  "run_report": "完整运行报告（包含上述6个部分，1000-1500字，用 Markdown 格式）",
+  "run_report": "200-300字筛选反思",
   "events_total": N,
   "selected_total": N
 }
@@ -493,7 +507,8 @@ def _build_scoring_prompt(items: list, clipper_text: str, interests_text: str, s
 - related_sources 必须列出该事件涉及的所有原始文章（标题、URL、来源名、channel），不要省略
 - glance 也要保留原文标题、来源名和 channel
 - channel 必须严格使用上面 5 个选项之一
-- run_report 是完整的运行日志，要写得详细，这是给编辑团队内部审阅的，必须包含数据源明细表（每个源的每篇文章标题都要列出）"""
+- run_report 是简短的筛选反思，不要列出所有文章标题
+- **极其重要：JSON字符串值中绝不使用英文双引号 " ，改用中文引号「」。这是因为未转义的双引号会破坏JSON结构。**"""
 
     # User prompt
     parts = []
@@ -523,6 +538,60 @@ def _build_scoring_prompt(items: list, clipper_text: str, interests_text: str, s
     return system_prompt, user_prompt
 
 
+def _repair_json(text: str) -> dict:
+    """Repair malformed JSON from LLM by iteratively escaping bad quotes.
+
+    Strategy: try json.loads, on failure escape the unquoted `"` at error
+    position with `\\"`, retry up to 100 times.
+    """
+    import re
+    candidate = text
+
+    for _ in range(200):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as e:
+            pos = e.pos
+            if pos >= len(candidate):
+                break
+            # Search near error position for an unescaped quote to fix
+            found = False
+            for off in range(max(0, pos - 3), min(len(candidate), pos + 1)):
+                if candidate[off] != '"':
+                    continue
+                if off > 0 and candidate[off - 1] == '\\':
+                    continue  # Already escaped
+                # Structural quotes: preceded by : [ { , or followed by , ] } :
+                before = candidate[:off].rstrip()
+                after = candidate[off + 1:].lstrip()
+                is_open = before and before[-1] in (':', '[', '{', ',')
+                is_close = after and after[0] in (',', ']', '}', ':')
+                if is_open and not is_close:
+                    continue  # Opening quote
+                if is_close:
+                    continue  # Closing quote
+                # Inner unescaped quote — escape it
+                candidate = candidate[:off] + '\\"' + candidate[off + 1:]
+                found = True
+                break
+            if not found:
+                break
+
+    # If still failing, try truncation repair
+    for trim in range(min(500, len(candidate))):
+        trial = candidate[:len(candidate) - trim]
+        open_braces = trial.count("{") - trial.count("}")
+        open_brackets = trial.count("[") - trial.count("]")
+        suffix = "]" * max(0, open_brackets) + "}" * max(0, open_braces)
+        trial = re.sub(r',\s*$', '', trial)
+        try:
+            return json.loads(trial + suffix)
+        except json.JSONDecodeError:
+            continue
+
+    raise json.JSONDecodeError("Cannot repair JSON", text, 0)
+
+
 def _parse_tiered_response(raw: str) -> dict | None:
     """Parse LLM JSON response into tiered structure. Returns None on failure."""
     try:
@@ -535,7 +604,18 @@ def _parse_tiered_response(raw: str) -> dict | None:
         if text.startswith("json"):
             text = text[4:].strip()
 
-        data = json.loads(text)
+        # Extract JSON between first { and last }
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace >= 0 and last_brace > first_brace:
+            text = text[first_brace:last_brace + 1]
+
+        # Try direct parse first
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # Attempt to repair truncated/malformed JSON
+            data = _repair_json(text)
 
         for key in ("headline", "noteworthy", "glance", "daily_summary", "run_report"):
             if key not in data:
@@ -547,7 +627,13 @@ def _parse_tiered_response(raw: str) -> dict | None:
 
         return data
     except (json.JSONDecodeError, Exception) as e:
-        logger.error(f"Failed to parse tiered response: {e}")
+        # Save raw content for debugging
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%H%M%S")
+        debug_path = Path(__file__).parent.parent / "output" / f"debug_llm_{ts}.txt"
+        debug_path.parent.mkdir(parents=True, exist_ok=True)
+        debug_path.write_text(raw if raw else "(empty)", encoding="utf-8", errors="replace")
+        logger.error(f"Failed to parse tiered response: {e} (saved to {debug_path})")
         return None
 
 

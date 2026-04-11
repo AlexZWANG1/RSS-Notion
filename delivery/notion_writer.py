@@ -327,7 +327,7 @@ async def write_digest_to_notion(
             "type": "bulleted_list_item",
             "bulleted_list_item": {
                 "rich_text": [
-                    {"text": {"content": f"[{source_name}] "}, "annotations": {"color": "gray"}},
+                    {"text": {"content": f"[{source_name}] "}, "annotations": {"color": "default"}},
                     {"text": rt, "annotations": {"bold": True}},
                 ],
             },
@@ -503,7 +503,7 @@ def _build_daily_report_blocks(tiered: dict, total_fetched: int = 0) -> list[dic
                     title_rt["link"] = {"url": src_url}
                 rich_text: list[dict[str, Any]] = []
                 if prefix:
-                    rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "gray"}})
+                    rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "default"}})
                 rich_text.append({"type": "text", "text": title_rt, "annotations": {"bold": True}})
                 if one_liner:
                     rich_text.append({"type": "text", "text": {"content": f" — {one_liner}"}})
@@ -537,7 +537,7 @@ def _build_daily_report_blocks(tiered: dict, total_fetched: int = 0) -> list[dic
                     title_rt["link"] = {"url": src_url}
                 rich_text: list[dict[str, Any]] = []
                 if prefix:
-                    rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "gray"}})
+                    rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "default"}})
                 rich_text.append({"type": "text", "text": title_rt, "annotations": {"bold": True}})
                 if one_liner:
                     rich_text.append({"type": "text", "text": {"content": f" — {one_liner}"}})
@@ -558,7 +558,7 @@ def _build_daily_report_blocks(tiered: dict, total_fetched: int = 0) -> list[dic
         url = item.get("url", "")
         rich_text: list[dict[str, Any]] = []
         if prefix:
-            rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "gray"}})
+            rich_text.append({"type": "text", "text": {"content": prefix}, "annotations": {"color": "default"}})
         title_rt: dict[str, Any] = {"content": title}
         if url:
             title_rt["link"] = {"url": url}
@@ -1226,9 +1226,13 @@ def _build_v2_blocks(
     if noteworthies:
         blocks.append(_heading2("🔍 值得关注"))
 
-        for item in noteworthies:
+        for idx, item in enumerate(noteworthies):
+            if idx > 0:
+                blocks.append(_divider())
             title = item.get("event_title", "")
-            blocks.append(_heading3(title))
+            priority = item.get("priority", "medium")
+            priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(priority, "🟡")
+            blocks.append(_heading3(f"{priority_emoji} {title}"))
 
             # Summary paragraph
             summary = item.get("summary", "")
@@ -1250,9 +1254,9 @@ def _build_v2_blocks(
                 liner = src.get("one_liner", "")
                 rt: list[dict] = [_plain_text(f"{ch} ")]
                 if src_url:
-                    rt.append(_link_text(name, src_url))
+                    rt.append(_link_text(name, src_url, bold=True))
                 else:
-                    rt.append(_plain_text(name))
+                    rt.append(_bold_text(name))
                 rt.append(_plain_text(" — "))
                 rt.append(_bold_text(src_title))
                 if liner:
@@ -1266,7 +1270,7 @@ def _build_v2_blocks(
         blocks.append(_heading2("⚡ 速览"))
 
         rows = [
-            [[_bold_text("来源")], [_bold_text("动态")]],
+            [[_bold_text("来源")], [_bold_text("标题")], [_bold_text("要点")]],
         ]
         for item in glances:
             ch = _channel_emoji(item.get("channel", ""))
@@ -1275,19 +1279,15 @@ def _build_v2_blocks(
             title = item.get("title", "")
             url = item.get("url", "")
             cell1 = [_plain_text(f"{ch} {name}")]
-            # Cell 2: title (linked if URL available) + one-liner
             if url and title:
-                cell2 = [_link_text(title, url)]
-                if liner:
-                    cell2.append(_plain_text(f" — {liner}"))
-            elif title and liner:
-                cell2 = [_bold_text(title), _plain_text(f" — {liner}")]
-            elif liner:
-                cell2 = [_plain_text(liner)]
+                cell2 = [_link_text(title, url, bold=True)]
+            elif title:
+                cell2 = [_bold_text(title)]
             else:
-                cell2 = [_plain_text(title)]
-            rows.append([cell1, cell2])
-        blocks.extend(_table_block(2, rows))
+                cell2 = [_plain_text("-")]
+            cell3 = [_plain_text(liner)] if liner else [_plain_text("-")]
+            rows.append([cell1, cell2, cell3])
+        blocks.extend(_table_block(3, rows))
 
         blocks.append(_divider())
 

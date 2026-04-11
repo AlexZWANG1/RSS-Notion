@@ -139,7 +139,7 @@ class XiaohongshuSource(BaseSource):
         all_items: list[SourceItem] = []
         seen_ids: set[str] = set()
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             # Initialize MCP session
             try:
                 ok = await self._init_session(client)
@@ -178,7 +178,7 @@ class XiaohongshuSource(BaseSource):
                                 all_items.append(item)
 
                 except Exception as exc:
-                    logger.warning("[小红书] Search for '%s' failed: %s", keyword, exc)
+                    logger.warning("[小红书] Search for '%s' failed: %r", keyword, exc)
 
         logger.info("[小红书] Found %d unique items across %d keywords", len(all_items), len(self.keywords))
         return all_items

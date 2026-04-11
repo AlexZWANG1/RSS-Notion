@@ -41,7 +41,7 @@ _SYSTEM_PROMPT = """\
     {
       "event_title": "事件标题（编辑润色后）",
       "source_count": 5,
-      "analysis": "200-300 字深度分析。第一句话加粗概括核心事实。关键数字用 **加粗**。要有态度和判断。",
+      "analysis": "150-250 字洞察分析。重点写'所以呢'——你的判断和推演，不要复述来源表格里已有的事实。关键数字、公司名、转折点必须用 **加粗**。",
       "best_source_url": "最佳来源 URL",
       "best_source_name": "最佳来源名",
       "related_sources": [
@@ -60,6 +60,7 @@ _SYSTEM_PROMPT = """\
     {
       "event_title": "事件标题",
       "source_count": 1,
+      "priority": "high|medium|low",
       "summary": "80-100 字摘要，有上下文和具体数字，关键部分 **加粗**",
       "insight": "一句话洞察——具体说出改变了什么判断，不是「值得关注」",
       "best_source_url": "最佳来源 URL",
@@ -95,8 +96,8 @@ _SYSTEM_PROMPT = """\
 }
 
 ## 各字段要求
-- headline: 1-3 个头条事件，每个有深度分析和完整来源列表
-- noteworthy: 2-5 个值得关注的事件
+- headline: 1-3 个头条事件。analysis 写洞察判断（"所以呢"），不要复述来源表格里的事实。关键数字必须 **加粗**。
+- noteworthy: 2-5 个值得关注的事件。priority 字段必填：high=宏观/算力/资本流向、medium=公司战略/技术趋势、low=观察/轶事
 - glance: 5-10 条速览
 - signals: 3-5 个从全量信息中提炼的趋势信号（这是你的独有价值——编辑视角的趋势判断）
 - one_liner: 一句话今日主线，要有态度

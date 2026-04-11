@@ -215,17 +215,37 @@ async def run_pipeline(
 
     result.executive_summary = tiered.get("daily_summary", "")
 
+    # --- Phase 3b: Enrich headline best_source with full text ---
+    logger.info("Phase 3b: Enriching headline sources with full text...")
+    from sources.content_fetcher import fetch_content
+    enriched_count = 0
+    for h in tiered.get("headline", []):
+        url = h.get("best_source_url", "")
+        if url and url.startswith("http"):
+            content = await fetch_content(url, max_chars=3000, timeout=15)
+            if content:
+                h["best_source_content"] = content
+                enriched_count += 1
+    for n in tiered.get("noteworthy", []):
+        url = n.get("best_source_url", "")
+        if url and url.startswith("http"):
+            content = await fetch_content(url, max_chars=2000, timeout=15)
+            if content:
+                n["best_source_content"] = content
+                enriched_count += 1
+    logger.info(f"  Enriched {enriched_count} sources with full text")
+
     # --- Phase 4: Write to Notion ---
     if not skip_notion:
         logger.info("Phase 4: Writing to Notion...")
 
-        # 4a: Call 2 — LLM generates structured JSON daily report
-        logger.info("  4a: Generating daily report v2 (structured JSON)...")
+        # 4a: Call 2 (daily report) — market analysis handled separately by Claude Code
+        logger.info("  4a: Generating daily report...")
         report_json = await generate_daily_report(tiered, all_items, config)
 
         # Write daily report page with native Notion blocks
         report_url = await write_daily_report_v2(
-            report_json, tiered, today, total_fetched=len(all_items)
+            report_json, tiered, today, total_fetched=len(all_items),
         )
         if report_url:
             logger.info(f"  Daily report v2: {report_url}")

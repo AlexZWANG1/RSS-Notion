@@ -16,17 +16,10 @@ import re
 from typing import Optional
 
 import httpx
-from openai import AsyncOpenAI
+
+from generator.interest_scorer import _call_with_retry
 
 logger = logging.getLogger(__name__)
-
-
-def _get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(
-        api_key=os.environ.get("OPENAI_API_KEY", ""),
-        base_url=os.environ.get("OPENAI_BASE_URL"),
-        timeout=180.0,
-    )
 
 
 def _extract_video_id(url: str) -> Optional[str]:
@@ -241,8 +234,6 @@ async def generate_deep_summary(
     is_video: bool = True, model: str = "gpt-5.4",
 ) -> Optional[str]:
     """Generate a deep summary from transcript/article via LLM."""
-    client = _get_client()
-
     # Truncate to fit context
     max_chars = 30000
     if len(content) > max_chars:
@@ -253,20 +244,14 @@ async def generate_deep_summary(
     else:
         system = _ARTICLE_PROMPT.format(title=title, source_name=source_name)
 
-    try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"## 全文内容\n\n{content}"},
-            ],
-            temperature=0.5,
-            timeout=180.0,
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"LLM summary failed for '{title}': {e}")
-        return None
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"## 全文内容\n\n{content}"},
+    ]
+    return await _call_with_retry(
+        client=None, messages=messages, model=model,
+        temperature=0.5, max_retries=2,
+    )
 
 
 # ---------------------------------------------------------------------------
