@@ -45,6 +45,13 @@ rss:
   - { name: "36氪", url: "https://36kr.com/feed", category: "中文媒体" }
   - { name: "量子位", url: "https://www.qbitai.com/feed", category: "中文媒体" }
   - { name: "InfoQ 中文", url: "https://www.infoq.cn/feed", category: "中文媒体" }
+  - { name: "晚点LatePost", url: "https://rsshub.rssforever.com/latepost", category: "中文媒体" }
+
+  # ── 投资研究（中文） ──
+  - { name: "海豚投研 (Longbridge)", url: "https://longbridge.com/hk/dolphin", category: "投资研究" }  # 无 RSS，需手动检查
+
+  # ── 投资研究（英文） ──
+  - { name: "Citrini Research", url: "https://www.citriniresearch.com/feed", category: "投资研究" }
 
   # ── 英文媒体 ──
   - { name: "Ars Technica AI", url: "https://arstechnica.com/ai/feed/", category: "英文媒体" }
@@ -54,6 +61,16 @@ rss:
 
   # ── 国际/亚洲 ──
   - { name: "Nikkei Asia Tech", url: "https://asia.nikkei.com/rss/feed/nar?type=topic&name=Technology", category: "国际视角" }
+
+  # ── 投资社区（市场观察用） ──
+  - { name: "Seeking Alpha Market News", url: "https://seekingalpha.com/market_currents.xml", category: "投资社区" }
+  - { name: "Seeking Alpha Top Ideas", url: "https://seekingalpha.com/feed.xml", category: "投资社区" }
+  - { name: "Seeking Alpha NVDA", url: "https://seekingalpha.com/api/sa/combined/NVDA.xml", category: "投资社区" }
+  - { name: "Seeking Alpha MSFT", url: "https://seekingalpha.com/api/sa/combined/MSFT.xml", category: "投资社区" }
+  - { name: "Seeking Alpha META", url: "https://seekingalpha.com/api/sa/combined/META.xml", category: "投资社区" }
+  - { name: "Seeking Alpha GOOGL", url: "https://seekingalpha.com/api/sa/combined/GOOGL.xml", category: "投资社区" }
+  - { name: "Seeking Alpha AMZN", url: "https://seekingalpha.com/api/sa/combined/AMZN.xml", category: "投资社区" }
+  - { name: "Seeking Alpha AVGO", url: "https://seekingalpha.com/api/sa/combined/AVGO.xml", category: "投资社区" }
 
   # ── 财经媒体（市场观察用） ──
   - { name: "Bloomberg Tech", url: "https://feeds.bloomberg.com/technology/news.rss", category: "财经媒体" }
@@ -75,3 +92,4 @@ search:
     - { site: "x.ai", query: "xAI Grok announcements" }
     - { site: "ai.meta.com", query: "Meta AI research blog" }
     - { site: "mistral.ai", query: "Mistral AI model release" }
+    - { site: "seekingalpha.com", query: "TSLA Tesla AI robotaxi autonomous" }

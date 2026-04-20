@@ -23,7 +23,7 @@
   "pipeline": {
     "sources": {
       "folo": { "enabled": true, "max_items": 60 },
-      "rss": { "enabled": true, "max_items": 60, "max_age_days": 7 },
+      "rss": { "enabled": true, "max_items": 100, "max_age_days": 7 },
       "hackernews": { "enabled": true, "max_items": 15 },
       "arxiv": { "enabled": true, "categories": ["cs.AI", "cs.CL", "cs.LG"], "max_items": 10 },
       "reddit": { "enabled": true, "subreddits": ["LocalLLaMA", "MachineLearning"], "max_items": 10 },
