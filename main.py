@@ -22,6 +22,7 @@ from sources.youtube import YouTubeSource
 from sources.xiaohongshu import XiaohongshuSource
 from sources.rss_fetcher import RSSFetcher
 from sources.tavily_search import TavilySearchSource
+from sources.agent_search import AgentSearchSource
 from sources.models import SourceResult, PipelineResult
 from generator.interest_scorer import load_user_interests, load_clipper_items, score_items
 from generator.daily_report import generate_daily_report
@@ -52,7 +53,8 @@ def load_config() -> dict:
 
 # Order matters: first sources get priority in dedup (_pre_filter keeps first seen)
 SOURCE_CLASSES = {
-    "folo": FoloSource,            # 最高优先级：用户订阅的 Twitter/博客/播客
+    "agent_search": AgentSearchSource,  # 最高优先级：Kimi 联网广搜（URL 已校验）
+    "folo": FoloSource,            # 已停用：域名迁移 + session token 过期
     "rss": RSSFetcher,             # 补充 RSS（官方博客/投资机构）
     "youtube": YouTubeSource,      # YouTube 频道
     "hackernews": HackerNewsSource, # 补充源

@@ -30,6 +30,7 @@ from sources.youtube import YouTubeSource
 from sources.xiaohongshu import XiaohongshuSource
 from sources.rss_fetcher import RSSFetcher
 from sources.tavily_search import TavilySearchSource
+from sources.agent_search import AgentSearchSource
 from sources.models import SourceResult, SourceItem
 from generator.interest_scorer import (
     load_user_interests,
@@ -49,6 +50,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 SOURCE_CLASSES = {
+    "agent_search": AgentSearchSource,
     "folo": FoloSource,
     "rss": RSSFetcher,
     "youtube": YouTubeSource,
