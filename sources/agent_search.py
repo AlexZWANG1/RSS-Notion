@@ -229,6 +229,66 @@ class AgentSearchSource(BaseSource):
 
         return [r for r in results if r]
 
+    # -- date verification ------------------------------------------------
+
+    async def _verify_dates(self, rows: list[dict]) -> list[dict]:
+        """Confirm each item's claimed date against the page itself.
+
+        This is the check whose absence broke the 2026-07-19 run. A URL that
+        resolves proves the page exists, not that it is recent: the model
+        surfaced GPT-5.3-Codex (published 2026-02-05), DeepSeek V4
+        (2026-04-24) and the Musk v. OpenAI verdict (2026-05-18) as
+        last-week news, and every one passed URL validation because the pages
+        are real. Search-sourced dates are model-inferred, so an item is
+        admitted only when its claimed date actually appears on the page.
+
+        RSS items are unaffected — those dates come from the publisher.
+        """
+        window = [
+            (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
+            for n in range(self.max_age_days + 1)
+        ]
+
+        async with httpx.AsyncClient(
+            timeout=45, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+        ) as client:
+
+            async def confirm(row: dict) -> Optional[dict]:
+                claimed = (row.get("date") or "").strip()[:10]
+                if claimed not in window:
+                    logger.info("[%s] dropped, claimed date %s outside window: %s",
+                                self.name, claimed or "(none)", row["url"][:70])
+                    return None
+                try:
+                    resp = await client.get(f"https://r.jina.ai/{row['url']}")
+                    body = resp.text if resp.status_code < 400 else ""
+                except Exception:
+                    body = ""
+                if not body:
+                    logger.info("[%s] dropped, date unverifiable: %s",
+                                self.name, row["url"][:70])
+                    return None
+
+                # Accept the claimed day, or any other day inside the window —
+                # publishers format dates inconsistently, so a same-window date
+                # anywhere on the page is enough corroboration.
+                head = body[:6000]
+                if any(d in head for d in window):
+                    return row
+                alt = [d for d in re.findall(r"20\d\d-\d\d-\d\d", head)]
+                if alt:
+                    logger.info("[%s] dropped, page dates %s not in window: %s",
+                                self.name, alt[:3], row["url"][:70])
+                else:
+                    logger.info("[%s] dropped, no date found on page: %s",
+                                self.name, row["url"][:70])
+                return None
+
+            results = await asyncio.gather(*(confirm(r) for r in rows))
+
+        return [r for r in results if r]
+
     # -- main -------------------------------------------------------------
 
     async def _fetch(self) -> list[SourceItem]:
@@ -259,6 +319,9 @@ class AgentSearchSource(BaseSource):
         rows = await self._validate(candidates)
         logger.info("[%s] %d/%d URLs verified reachable",
                     self.name, len(rows), len(candidates))
+
+        rows = await self._verify_dates(rows)
+        logger.info("[%s] %d items survived date verification", self.name, len(rows))
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=self.max_age_days)
         items: list[SourceItem] = []

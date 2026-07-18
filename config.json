@@ -1,5 +1,5 @@
 {
-  "model": "kimi-code/kimi-for-coding",
+  "model": "claude-opus-4-8",
   "notion": {
     "inbox_database_id": "d1da0a02-bb0f-4dfd-a7d0-8cf918e6f23c",
     "inbox_data_source": "collection://ea643ad3-5c45-435d-b914-e16b46af8ec1",
@@ -84,8 +84,8 @@
       }
     },
     "llm": {
-      "summary_model": "kimi-code/kimi-for-coding",
-      "processing_model": "kimi-code/kimi-for-coding-highspeed"
+      "summary_model": "claude-opus-4-8",
+      "processing_model": "claude-opus-4-8"
     },
     "pdf": {
       "template": "daily_report",

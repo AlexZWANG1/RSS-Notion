@@ -137,23 +137,37 @@ async def _call_with_retry(
             resp_path = resp_tmp.name
             resp_tmp.close()
 
-            cmd = [
-                _kimi_bin(), "-p", prompt_text,
-                "--output-format", "stream-json",
-                "-m", model,
-            ]
+            # Dispatch on model id: claude-* goes to the Claude CLI (prompt on
+            # stdin, {"result": ...} JSON wrapper), anything else to Kimi
+            # (prompt on argv, stream-json JSONL).
+            use_claude = model.startswith("claude-")
+            if use_claude:
+                cmd = ["claude", "-p", "--output-format", "json", "--model", model]
+                stdin_mode = asyncio.subprocess.PIPE
+                stdin_data = prompt_text.encode("utf-8")
+            else:
+                cmd = [
+                    _kimi_bin(), "-p", prompt_text,
+                    "--output-format", "stream-json",
+                    "-m", model,
+                ]
+                stdin_mode = asyncio.subprocess.DEVNULL
+                stdin_data = None
+
+            env = {**os.environ}
+            env.pop("CLAUDECODE", None)  # avoid nested-session detection
 
             resp_fh = open(resp_path, "wb")
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
-                    stdin=asyncio.subprocess.DEVNULL,
+                    stdin=stdin_mode,
                     stdout=resp_fh,
                     stderr=asyncio.subprocess.PIPE,
-                    env={**os.environ},
+                    env=env,
                 )
                 _, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=1800,
+                    proc.communicate(input=stdin_data), timeout=1800,
                 )
             finally:
                 resp_fh.close()
@@ -171,19 +185,26 @@ async def _call_with_retry(
                     f"kimi exited {proc.returncode}: {stderr_text[:500]}"
                 )
 
-            # stream-json is JSONL: keep assistant content, drop the meta line
-            chunks: list[str] = []
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
+            if use_claude:
+                # Claude CLI wraps the answer as {"result": "..."}
                 try:
-                    evt = json.loads(line)
+                    content = json.loads(raw).get("result", "").strip()
                 except json.JSONDecodeError:
-                    continue
-                if evt.get("role") == "assistant":
-                    chunks.append(evt.get("content", ""))
-            content = "".join(chunks).strip()
+                    content = raw
+            else:
+                # stream-json is JSONL: keep assistant content, drop meta line
+                chunks: list[str] = []
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        evt = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if evt.get("role") == "assistant":
+                        chunks.append(evt.get("content", ""))
+                content = "".join(chunks).strip()
 
             logger.info("Kimi CLI: %d bytes raw, %d chars result",
                         len(raw_bytes), len(content))
