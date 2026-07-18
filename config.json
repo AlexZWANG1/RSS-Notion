@@ -20,6 +20,14 @@
   "folo": {
     "session_token_env": "FOLO_SESSION_TOKEN"
   },
+  "local_webclipper": {
+    "enabled": true,
+    "paths": [
+      "/Users/项目开发/研究空间/investor-wiki/raw/webclipper"
+    ],
+    "max_items": 60,
+    "max_chars_per_item": 600
+  },
   "pipeline": {
     "sources": {
       "folo": { "enabled": true, "max_items": 60 },
@@ -36,7 +44,7 @@
         "max_per_query": 3
       },
       "xiaohongshu": {
-        "enabled": true,
+        "enabled": false,
         "max_items": 10,
         "mcp_url": "http://localhost:18060/mcp",
         "keywords": ["AI", "大模型", "人工智能", "LLM", "Agent"]

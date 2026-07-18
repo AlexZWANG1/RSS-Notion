@@ -1132,6 +1132,29 @@ def _channel_emoji(channel: str) -> str:
     return CHANNEL_EMOJI.get(channel, "⚪")
 
 
+def _source_section_blocks(title: str, icon: str, items: list[dict]) -> list[dict]:
+    if not items:
+        return []
+
+    rows = [
+        [[_bold_text("来源")], [_bold_text("标题")], [_bold_text("简介")]],
+    ]
+    for item in items:
+        source = item.get("source_name", "") or item.get("author", "") or "-"
+        author = item.get("author", "")
+        if author and author not in source:
+            source = f"{source} / {author}"
+        title_text = item.get("title", "") or "-"
+        url = item.get("url", "")
+        summary = item.get("one_liner") or item.get("description") or "-"
+        cell1 = [_plain_text(f"{icon} {source}"[:400])]
+        cell2 = [_link_text(title_text[:600], url, bold=True)] if url else [_bold_text(title_text[:600])]
+        cell3 = [_plain_text(summary[:900])]
+        rows.append([cell1, cell2, cell3])
+
+    return [_heading2(title), *_table_block(3, rows), _divider()]
+
+
 def _build_v2_blocks(
     report: dict,
     total_fetched: int,
@@ -1153,6 +1176,8 @@ def _build_v2_blocks(
     noteworthies = report.get("noteworthy", [])
     glances = report.get("glance", [])
     signals = report.get("signals", [])
+    podcast_results = report.get("podcast_results", [])
+    xiaohongshu_results = report.get("xiaohongshu_results", [])
     events_total = report.get("events_total", 0)
     selected_total = report.get(
         "selected_total",
@@ -1300,6 +1325,9 @@ def _build_v2_blocks(
             blocks.append(_bullet([_bold_text(kw), _plain_text(f" — {note}")]))
         blocks.append(_divider())
 
+    blocks.extend(_source_section_blocks("🎧 播客/视频全量速览", "🎧", podcast_results))
+    blocks.extend(_source_section_blocks("📕 小红书 MCP 速览", "📕", xiaohongshu_results))
+
     # === Footer stats callout (blue) ===
     footer = (
         f"来源统计 · 扫描 {total_fetched} 篇 → 聚合 {events_total} 事件"
@@ -1345,6 +1373,9 @@ async def write_daily_report_v2(
     # Prefer Call 2's one_liner; fallback to Call 1's daily_summary
     if "one_liner" not in data:
         data["one_liner"] = tiered.get("daily_summary", "")
+    for section_key in ("podcast_results", "xiaohongshu_results"):
+        if section_key not in data and tiered.get(section_key):
+            data[section_key] = tiered[section_key]
 
     blocks = _build_v2_blocks(data, total_fetched, today)
     logger.info("Writing daily report v2 with %d blocks", len(blocks))

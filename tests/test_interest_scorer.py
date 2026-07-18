@@ -38,6 +38,35 @@ def test_parse_clipper_results_empty():
     assert text == ""
 
 
+def test_load_local_webclipper_items(tmp_path):
+    from generator.interest_scorer import _load_local_webclipper_items
+
+    clip = tmp_path / "SDK 才是 AI 的军备竞赛.md"
+    clip.write_text(
+        '---\n'
+        'title: "SDK 才是 AI 的军备竞赛"\n'
+        'source: "https://www.xiaohongshu.com/explore/abc"\n'
+        'created: 2026-04-23\n'
+        'description: "模型是子弹，SDK 是枪。"\n'
+        '---\n'
+        '正文会被 frontmatter description 覆盖。\n',
+        encoding="utf-8",
+    )
+
+    text = _load_local_webclipper_items({
+        "local_webclipper": {
+            "enabled": True,
+            "paths": [str(tmp_path)],
+            "max_items": 10,
+            "max_chars_per_item": 80,
+        }
+    })
+
+    assert "SDK 才是 AI 的军备竞赛" in text
+    assert "https://www.xiaohongshu.com/explore/abc" in text
+    assert "模型是子弹，SDK 是枪" in text
+
+
 def test_parse_tiered_response():
     from generator.interest_scorer import _parse_tiered_response
 

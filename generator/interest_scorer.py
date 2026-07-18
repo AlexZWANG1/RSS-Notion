@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -31,6 +32,8 @@ DEFAULT_TOPICS = [
     "大模型应用与产品",
     "开源模型与工具",
 ]
+
+_FRONTMATTER_BOUNDARY = "---"
 
 
 # ---------------------------------------------------------------------------
@@ -329,8 +332,119 @@ def _parse_clipper_results(results: list) -> str:
     return "\n".join(lines)
 
 
-async def load_clipper_items(config: dict) -> str:
-    """Query Web Clipper database for recent 14 days of clippings. Returns formatted text."""
+def _strip_frontmatter_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
+    return value.replace('\\"', '"').strip()
+
+
+def _split_markdown_frontmatter(text: str) -> tuple[dict[str, str], str]:
+    """Return simple YAML frontmatter metadata and body text."""
+    if not text.startswith(_FRONTMATTER_BOUNDARY):
+        return {}, text
+
+    parts = text.split(_FRONTMATTER_BOUNDARY, 2)
+    if len(parts) < 3:
+        return {}, text
+
+    meta: dict[str, str] = {}
+    for line in parts[1].splitlines():
+        if ":" not in line or line.startswith(" "):
+            continue
+        key, value = line.split(":", 1)
+        meta[key.strip()] = _strip_frontmatter_quotes(value)
+    return meta, parts[2]
+
+
+def _clean_markdown_excerpt(body: str, max_chars: int) -> str:
+    lines: list[str] = []
+    skip_exact = {"全部", "图文", "视频", "用户", "筛选", "回到顶部", "加载中", "说点什么..."}
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line in skip_exact:
+            continue
+        if line.startswith("![") or line.startswith("[![") or line.startswith("<iframe"):
+            continue
+        if re.fullmatch(r"[\d/]+", line):
+            continue
+        line = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", line)
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+        line = re.sub(r"\s+", " ", line).strip()
+        if line:
+            lines.append(line)
+        if sum(len(x) for x in lines) >= max_chars:
+            break
+    return " ".join(lines)[:max_chars].strip()
+
+
+def _parse_local_webclipper_file(path: Path, max_chars: int = 600) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    meta, body = _split_markdown_frontmatter(text)
+    title = meta.get("title") or path.stem
+    summary = meta.get("description") or _clean_markdown_excerpt(body, max_chars)
+    return {
+        "title": title,
+        "url": meta.get("source", ""),
+        "created": meta.get("created", "") or meta.get("published", ""),
+        "summary": re.sub(r"\s+", " ", summary).strip()[:max_chars],
+    }
+
+
+def _load_local_webclipper_items(config: dict) -> str:
+    """Load local Obsidian Webclipper markdown files as preference signal."""
+    cfg = (config or {}).get("local_webclipper", {})
+    if not cfg or not cfg.get("enabled", True):
+        return ""
+
+    paths = cfg.get("paths") or []
+    max_items = int(cfg.get("max_items", 60))
+    max_chars = int(cfg.get("max_chars_per_item", 600))
+
+    files: list[Path] = []
+    for raw_path in paths:
+        path = Path(str(raw_path)).expanduser()
+        if path.is_dir():
+            files.extend(path.glob("*.md"))
+        elif path.is_file():
+            files.append(path)
+
+    if not files:
+        return ""
+
+    seen_titles: set[str] = set()
+    lines: list[str] = []
+    for path in sorted(set(files), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            item = _parse_local_webclipper_file(path, max_chars=max_chars)
+        except OSError as exc:
+            logger.warning("Failed to read local Webclipper file %s: %s", path, exc)
+            continue
+
+        title = item.get("title", "").strip()
+        if not title or title.lower() in seen_titles:
+            continue
+        seen_titles.add(title.lower())
+
+        line = f"- {title}"
+        if item.get("created"):
+            line += f" ({item['created']})"
+        if item.get("url"):
+            line += f"\n  URL: {item['url']}"
+        if item.get("summary"):
+            line += f"\n  摘要: {item['summary']}"
+        lines.append(line)
+
+        if len(lines) >= max_items:
+            break
+
+    if lines:
+        logger.info("Loaded %d local Webclipper items", len(lines))
+    return "\n".join(lines)
+
+
+async def _load_notion_clipper_items(config: dict) -> str:
+    """Query Web Clipper database for recent 14 days of clippings."""
     import httpx
 
     db_id = (config or {}).get("notion", {}).get("clipper_database_id", "")
@@ -370,6 +484,21 @@ async def load_clipper_items(config: dict) -> str:
     except Exception as e:
         logger.warning(f"Failed to query Web Clipper: {e}")
         return ""
+
+
+async def load_clipper_items(config: dict) -> str:
+    """Load Web Clipper preference signals from local Obsidian and Notion."""
+    parts: list[str] = []
+
+    local_text = _load_local_webclipper_items(config)
+    if local_text:
+        parts.append("### 本地 Obsidian Webclipper\n" + local_text)
+
+    notion_text = await _load_notion_clipper_items(config)
+    if notion_text:
+        parts.append("### Notion Web Clipper\n" + notion_text)
+
+    return "\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------

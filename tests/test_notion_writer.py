@@ -1,5 +1,9 @@
 import pytest
-from delivery.notion_writer import _build_daily_report_blocks, _build_clipper_summary_prompt
+from delivery.notion_writer import (
+    _build_daily_report_blocks,
+    _build_clipper_summary_prompt,
+    _build_v2_blocks,
+)
 
 
 def test_build_daily_report_blocks():
@@ -79,3 +83,34 @@ def test_build_clipper_summary_prompt():
     assert "Test Article" in prompt
     assert "https://example.com" in prompt
     assert "summary" in prompt
+
+
+def test_build_v2_blocks_with_full_source_sections():
+    report = {
+        "one_liner": "Test day.",
+        "headline": [],
+        "noteworthy": [],
+        "glance": [],
+        "signals": [],
+        "podcast_results": [{
+            "title": "Demis Hassabis Interview",
+            "url": "https://youtube.com/watch?v=abc",
+            "source_name": "Y Combinator",
+            "one_liner": "A long conversation on AI labs.",
+        }],
+        "xiaohongshu_results": [{
+            "title": "做AI Agent的99%会死掉。",
+            "url": "https://www.xiaohongshu.com/explore/abc",
+            "source_name": "小红书",
+            "one_liner": "[normal] 点赞:705 收藏:529 评论:216",
+        }],
+    }
+
+    blocks = _build_v2_blocks(report, total_fetched=20, today="2026-04-30")
+    heading_texts = [
+        b["heading_2"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b.get("type") == "heading_2"
+    ]
+    assert "🎧 播客/视频全量速览" in heading_texts
+    assert "📕 小红书 MCP 速览" in heading_texts

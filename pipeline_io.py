@@ -111,6 +111,99 @@ def _dict_to_source_item(d: dict) -> SourceItem:
     )
 
 
+_PODCAST_SOURCE_HINTS = (
+    "youtube",
+    "podcast",
+    "no priors",
+    "lex fridman",
+    "dwarkesh",
+    "all-in",
+    "fireship",
+    "two minute papers",
+    "ai explained",
+    "y combinator",
+    "andrej karpathy",
+    "yannic",
+)
+
+
+def _item_one_liner(item: dict) -> str:
+    desc = (item.get("description") or "").strip()
+    if desc:
+        return desc[:600]
+    author = (item.get("author") or "").strip()
+    score = item.get("score")
+    parts = []
+    if author:
+        parts.append(f"作者：{author}")
+    if score is not None:
+        parts.append(f"热度：{score}")
+    return "；".join(parts)
+
+
+def _source_section_item(item: dict) -> dict:
+    return {
+        "title": item.get("title", ""),
+        "url": item.get("url", ""),
+        "source_name": item.get("source_name", ""),
+        "author": item.get("author", ""),
+        "score": item.get("score"),
+        "published": item.get("published"),
+        "description": item.get("description", ""),
+        "one_liner": _item_one_liner(item),
+    }
+
+
+def _is_podcast_or_video(item: dict) -> bool:
+    url = (item.get("url") or "").lower()
+    source = (item.get("source_name") or "").lower()
+    extra = item.get("extra") or {}
+    if extra.get("video_id"):
+        return True
+    if "youtube.com/watch" in url or "youtu.be/" in url:
+        return True
+    return any(hint in source for hint in _PODCAST_SOURCE_HINTS)
+
+
+def _load_all_source_sections(tiered_path: str) -> dict[str, list[dict]]:
+    sources_path = Path(tiered_path).with_name("sources.json")
+    if not sources_path.exists():
+        return {"podcast_results": [], "xiaohongshu_results": []}
+
+    payload = json.loads(sources_path.read_text(encoding="utf-8"))
+    seen_podcast: set[tuple[str, str]] = set()
+    seen_xhs: set[tuple[str, str]] = set()
+    podcast_results: list[dict] = []
+    xiaohongshu_results: list[dict] = []
+
+    for item in payload.get("items", []):
+        key = (item.get("title", ""), item.get("url", ""))
+        if _is_podcast_or_video(item) and key not in seen_podcast:
+            seen_podcast.add(key)
+            podcast_results.append(_source_section_item(item))
+        if item.get("source_name") == "小红书" and key not in seen_xhs:
+            seen_xhs.add(key)
+            xiaohongshu_results.append(_source_section_item(item))
+
+    return {
+        "podcast_results": podcast_results,
+        "xiaohongshu_results": xiaohongshu_results,
+    }
+
+
+def _attach_source_sections(
+    tiered: dict,
+    report: dict | None,
+    sections: dict[str, list[dict]],
+) -> None:
+    for key, items in sections.items():
+        if not items:
+            continue
+        tiered.setdefault(key, items)
+        if report is not None:
+            report.setdefault(key, items)
+
+
 # =========================================================================
 # FETCH command
 # =========================================================================
@@ -216,6 +309,9 @@ async def cmd_write(tiered_path: str) -> None:
     tiered = tiered_data.get("tiered", tiered_data)
     report = tiered_data.get("report")  # optional Call 2 output
     total_fetched = tiered_data.get("total_fetched", 0)
+
+    source_sections = _load_all_source_sections(tiered_path)
+    _attach_source_sections(tiered, report, source_sections)
 
     # Phase 3b: Enrich headline/noteworthy with full text
     logger.info("Enriching headline sources with full text...")
@@ -341,6 +437,8 @@ async def cmd_write(tiered_path: str) -> None:
         "date": today,
         "daily_summary": tiered.get("daily_summary", ""),
         "tiered": tiered,
+        "podcast_results": tiered.get("podcast_results", []),
+        "xiaohongshu_results": tiered.get("xiaohongshu_results", []),
         "sources": tiered_data.get("sources", []),
         "stats": {
             "total_fetched": total_fetched,

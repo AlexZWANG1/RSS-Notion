@@ -143,6 +143,26 @@ def _format_glance(item: dict[str, Any], idx: int) -> str:
     return line
 
 
+def _format_source_section(title: str, items: list[dict[str, Any]]) -> str:
+    out: list[str] = [f"## {title}", ""]
+    for i, item in enumerate(items, 1):
+        item_title = item.get("title", "Untitled")
+        url = item.get("url", "")
+        source = item.get("source_name", "")
+        summary = item.get("one_liner") or item.get("description") or ""
+        if url:
+            out.append(f"### {i}. [{item_title}]({url})")
+        else:
+            out.append(f"### {i}. {item_title}")
+        if source:
+            out.append(f"*{source}*")
+        if summary:
+            out.append("")
+            out.append(summary)
+        out.append("")
+    return "\n".join(out)
+
+
 def write_daily_report_obsidian(
     vault_root: str | Path,
     data: dict[str, Any],
@@ -176,6 +196,8 @@ def write_daily_report_obsidian(
     headlines = tiered.get("headline", []) or []
     noteworthies = tiered.get("noteworthy", []) or []
     glances = tiered.get("glance", []) or []
+    podcast_results = data.get("podcast_results") or tiered.get("podcast_results") or []
+    xiaohongshu_results = data.get("xiaohongshu_results") or tiered.get("xiaohongshu_results") or []
 
     parts: list[str] = []
     parts.append(_frontmatter(date_str, stats))
@@ -200,6 +222,12 @@ def write_daily_report_obsidian(
         for i, item in enumerate(glances, 1):
             parts.append(_format_glance(item, i))
         parts.append("")
+
+    if podcast_results:
+        parts.append(_format_source_section("🎧 播客/视频全量速览", podcast_results))
+
+    if xiaohongshu_results:
+        parts.append(_format_source_section("📕 小红书 MCP 速览", xiaohongshu_results))
 
     content = "\n".join(parts).rstrip() + "\n"
     target.write_text(content, encoding="utf-8")
