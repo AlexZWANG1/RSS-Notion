@@ -72,8 +72,25 @@ class UserFeedback:
 
 
 # ---------------------------------------------------------------------------
-# Claude CLI backend
+# Kimi CLI backend
 # ---------------------------------------------------------------------------
+
+# kimi takes the prompt as an argv value, so the whole prompt counts against
+# ARG_MAX (1MB on macOS). Typical digest prompts run 100-300KB; bail loudly
+# rather than let execve fail with a confusing E2BIG.
+_MAX_PROMPT_BYTES = 700_000
+
+
+def _kimi_bin() -> str:
+    """Locate the kimi executable (not on PATH by default)."""
+    import shutil
+
+    return (
+        os.environ.get("KIMI_BIN")
+        or shutil.which("kimi")
+        or str(Path.home() / ".kimi-code" / "bin" / "kimi")
+    )
+
 
 async def _call_with_retry(
     client: None,
@@ -83,9 +100,11 @@ async def _call_with_retry(
     max_retries: int,
     response_format: Optional[dict] = None,
 ) -> Optional[str]:
-    """Call Claude CLI (`claude -p`) with retry.
+    """Call Kimi CLI (`kimi -p`) with retry.
 
-    Uses stdout-to-file redirection to avoid Windows pipe issues.
+    Uses stdout-to-file redirection to avoid pipe-buffer issues on large
+    responses. Output is stream-json (JSONL): assistant lines carry the
+    content, a trailing meta line carries the session resume hint.
     """
     import tempfile
 
@@ -99,44 +118,45 @@ async def _call_with_retry(
             parts.append(msg["content"])
     prompt_text = "\n".join(parts)
 
+    prompt_bytes = len(prompt_text.encode("utf-8"))
+    if prompt_bytes > _MAX_PROMPT_BYTES:
+        logger.error(
+            "Prompt is %d bytes, over the %d limit for argv — reduce max_selected "
+            "or split the batch.",
+            prompt_bytes, _MAX_PROMPT_BYTES,
+        )
+        return None
+
     backoff_seconds = [2, 8, 30]
 
     for attempt in range(max_retries + 1):
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False, encoding="utf-8",
-            ) as f:
-                f.write(prompt_text)
-                tmp_path = f.name
-
             resp_tmp = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".json", mode="wb",
+                delete=False, suffix=".jsonl", mode="wb",
             )
             resp_path = resp_tmp.name
             resp_tmp.close()
 
-            try:
-                cmd = ["claude", "-p", "--output-format", "json", "--model", model]
-                env = {**os.environ}
-                env.pop("CLAUDECODE", None)
+            cmd = [
+                _kimi_bin(), "-p", prompt_text,
+                "--output-format", "stream-json",
+                "-m", model,
+            ]
 
-                resp_fh = open(resp_path, "wb")
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdin=asyncio.subprocess.PIPE,
-                        stdout=resp_fh,
-                        stderr=asyncio.subprocess.PIPE,
-                        env=env,
-                    )
-                    _, stderr = await asyncio.wait_for(
-                        proc.communicate(input=prompt_text.encode("utf-8")),
-                        timeout=1800,
-                    )
-                finally:
-                    resp_fh.close()
+            resp_fh = open(resp_path, "wb")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=resp_fh,
+                    stderr=asyncio.subprocess.PIPE,
+                    env={**os.environ},
+                )
+                _, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=1800,
+                )
             finally:
-                Path(tmp_path).unlink(missing_ok=True)
+                resp_fh.close()
 
             raw_bytes = Path(resp_path).read_bytes()
             Path(resp_path).unlink(missing_ok=True)
@@ -144,21 +164,28 @@ async def _call_with_retry(
 
             stderr_text = stderr.decode("utf-8", errors="replace").strip()
             if stderr_text:
-                logger.warning("Claude CLI stderr (first 300): %s", stderr_text[:300])
+                logger.warning("Kimi CLI stderr (first 300): %s", stderr_text[:300])
 
             if proc.returncode != 0:
                 raise RuntimeError(
-                    f"claude exited {proc.returncode}: {stderr_text[:500]}"
+                    f"kimi exited {proc.returncode}: {stderr_text[:500]}"
                 )
 
-            # Extract result from JSON wrapper
-            try:
-                wrapper = json.loads(raw)
-                content = wrapper.get("result", "").strip()
-            except json.JSONDecodeError:
-                content = raw
+            # stream-json is JSONL: keep assistant content, drop the meta line
+            chunks: list[str] = []
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if evt.get("role") == "assistant":
+                    chunks.append(evt.get("content", ""))
+            content = "".join(chunks).strip()
 
-            logger.info("Claude CLI: %d bytes raw, %d chars result",
+            logger.info("Kimi CLI: %d bytes raw, %d chars result",
                         len(raw_bytes), len(content))
             return content if content else None
 
@@ -166,13 +193,13 @@ async def _call_with_retry(
             if attempt < max_retries:
                 delay = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
                 logger.warning(
-                    "Claude CLI call failed (attempt %d/%d): %s — retrying in %ds",
+                    "Kimi CLI call failed (attempt %d/%d): %s — retrying in %ds",
                     attempt + 1, max_retries + 1, exc, delay,
                 )
                 await asyncio.sleep(delay)
             else:
                 logger.error(
-                    "Claude CLI call failed after %d attempts: %s",
+                    "Kimi CLI call failed after %d attempts: %s",
                     max_retries + 1, exc,
                 )
                 return None
